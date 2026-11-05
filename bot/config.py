@@ -155,8 +155,9 @@ IG_PAGE_ID = os.environ.get("IG_PAGE_ID", "")
 GRAPH_API_VERSION = os.environ.get("GRAPH_API_VERSION") or "v23.0"
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-# claude-opus-5-5 writes the best captions. claude-haiku-5-5 costs ~40x less.
-CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL") or "claude-opus-5-5"
+# claude-haiku-5-5: under £1/month for every draft. Set CLAUDE_MODEL=claude-opus-5-5 for richer
+# captions (~£10-30/month at 30-60 drafts a day).
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL") or "claude-haiku-5-5"
 
 # Public base URL where card images are reachable (Instagram downloads them from here).
 # On GitHub Actions this is worked out automatically from the repo name and branch.

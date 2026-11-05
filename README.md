@@ -61,10 +61,10 @@ You don't need App Review. In development mode the app can post to accounts you 
    Set a **monthly spend limit** too.
 2. **API Keys** → Create key. That's `ANTHROPIC_API_KEY`.
 
-**Cost:** roughly 1.5–2p per story with `claude-opus-5-5` (best captions). With around 30–60 new stories a day,
-that's about **£10–30 a month**. Set the variable `CLAUDE_MODEL` to `claude-haiku-5-5` in Step 4 and it's
-**under £1 a month**. Either way, the monthly spend limit in the Anthropic console is a hard cap.
-The captions are a bit plainer but still good. If you leave the key out entirely, the bot still works with free template captions.
+**Cost:** the bot uses `claude-haiku-5-5`. At around 30–60 new stories a day, that's **under £1 a month**.
+The monthly spend limit in the Anthropic console is a hard cap, so £5 of credit lasts months.
+If you ever want richer captions, set the variable `CLAUDE_MODEL` to `claude-opus-5-5` in Step 4
+(about £10–30 a month). If you leave the key out entirely, the bot still works with free template captions.
 
 ### Step 4 – GitHub (runs the bot for free)
 1. Create a free account at **github.com**.
@@ -78,7 +78,7 @@ The captions are a bit plainer but still good. If you leave the key out entirely
      (or ask a friend with Python). It encrypts the bot's memory, so followers' DMs are never readable in the
      public repo. **If you lose it, the bot just starts fresh. Never post it anywhere.**
    - **Secrets** tab → *New repository secret*, once for each of the 7 secrets above.
-   - **Variables** tab (optional): `CLAUDE_MODEL` = `claude-haiku-5-5` to save money. `GRAPH_API_VERSION` is only needed
+   - **Variables** tab (optional): `CLAUDE_MODEL` only if you want a different AI model. `GRAPH_API_VERSION` is only needed
      if Meta deprecates the default (`v23.0`); use the newest version shown in Graph API Explorer.
 5. **Actions** tab → enable workflows → **imjustsheff bot** → **Run workflow**.
 
