@@ -3,3 +3,4 @@ requests>=2.32
 feedparser>=6.0
 beautifulsoup4>=4.12
 Pillow>=10.4
+cryptography>=43.0

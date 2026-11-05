@@ -140,7 +140,8 @@ SKIP_WORDS = [
 # --- Behaviour ---------------------------------------------------------------
 DEDUPE_WINDOW_HOURS = 72          # compare new items against stories from this long ago
 MAX_NEW_ITEMS_PER_RUN = 15        # the rest wait for the next run
-CARD_RETENTION_DAYS = 14          # old card images are deleted from the repo
+CARD_RETENTION_DAYS = 14          # stories (and their private photos) older than this are forgotten
+PUBLIC_CARD_DAYS = 2              # posted card images are removed from the repo after this
 SEEN_RETENTION_DAYS = 60
 
 # --- Secrets / environment -------------------------------------------------------
@@ -165,8 +166,13 @@ IMAGE_BASE_URL = os.environ.get("IMAGE_BASE_URL") or (
     f"https://raw.githubusercontent.com/{_repo}/{_branch}" if _repo else ""
 )
 
+# Encrypts the bot's memory and private photos in the public repo (see bot/vault.py).
+STATE_KEY = os.environ.get("STATE_KEY", "")
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-STATE_PATH = os.path.join(ROOT, "state.json")
-CARDS_DIR = os.path.join(ROOT, "cards")
+STATE_PATH = os.path.join(ROOT, "state.enc")
+CARDS_DIR = os.path.join(ROOT, "cards")      # public: only cards of approved posts (Instagram downloads them)
+PRIVATE_DIR = os.path.join(ROOT, "private")  # encrypted photos
+WORK_DIR = os.path.join(ROOT, "work")        # scratch space, never committed
 FONTS_DIR = os.path.join(ROOT, "fonts")
 PHOTOS_DIR = os.path.join(ROOT, "photos")  # your own area photos, e.g. photos/sheffield.jpg

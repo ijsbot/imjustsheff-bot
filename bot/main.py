@@ -5,13 +5,16 @@ Run with:  python -m bot.main            (normal run - GitHub Actions does this 
            python -m bot.main --card "Some headline"   (render a test card to cards/test.jpg)
 """
 import hashlib
-import json
 import os
 import re
+import subprocess
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 
-from . import card, config, instagram, instagram_dms, sources, telegram, writer
+import requests
+
+from . import card, config, instagram, instagram_dms, sources, telegram, vault, writer
 
 HELP = (
     "👋 imjustsheff bot\n\n"
@@ -29,16 +32,31 @@ def now():
     return datetime.now(timezone.utc)
 
 
-def load_state():
-    if os.path.exists(config.STATE_PATH):
-        with open(config.STATE_PATH, encoding="utf-8") as fh:
-            return json.load(fh)
-    return {}
+def work_path(name):
+    os.makedirs(config.WORK_DIR, exist_ok=True)
+    return os.path.join(config.WORK_DIR, name)
 
 
-def save_state(state):
-    with open(config.STATE_PATH, "w", encoding="utf-8") as fh:
-        json.dump(state, fh, indent=1, ensure_ascii=False)
+def make_public(path):
+    """Commit and push one card image so Instagram can download it from the public repo."""
+    if not os.environ.get("GITHUB_ACTIONS"):
+        return
+    rel = os.path.relpath(path, config.ROOT).replace(os.sep, "/")
+    subprocess.run(["git", "add", rel], cwd=config.ROOT, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", f"bot: card {os.path.basename(rel)}"], cwd=config.ROOT, check=True)
+    subprocess.run(["git", "push", "-q"], cwd=config.ROOT, check=True)
+
+
+def wait_until_online(url, seconds=90):
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        try:
+            if requests.head(url, timeout=10).status_code == 200:
+                return
+        except requests.RequestException:
+            pass
+        time.sleep(5)
+    raise RuntimeError("card image didn't come online in time")
 
 
 class Bot:
@@ -51,7 +69,6 @@ class Bot:
         state.setdefault("seen", {})
         state.setdefault("stories", {})
         self.telegram_on = bool(config.TELEGRAM_BOT_TOKEN and config.TELEGRAM_CHAT_ID) and not dry_run
-        self.rendered_this_run = set()  # these cards aren't online until the run's commit is pushed
 
     # --- helpers -----------------------------------------------------------
     def log(self, msg):
@@ -72,19 +89,26 @@ class Bot:
                 return st
         return None
 
-    def render_card(self, story):
+    def render_card(self, story, out_path=None):
+        """Draft previews go to the private work folder; only approved posts get a public card."""
         story["card_version"] = story.get("card_version", 0) + 1
-        rel = f"cards/{story['id']}-{story['card_version']}.jpg"
+        out_path = out_path or work_path(f"{story['id']}-{story['card_version']}.jpg")
         # A photo you sent for this story wins; otherwise one of your own area photos.
         photo, credit = None, None
         if story.get("photo"):
-            photo, credit = os.path.join(config.ROOT, story["photo"]), story.get("photo_credit")
+            photo, credit = vault.open_photo(story["photo"]), story.get("photo_credit")
         elif story.get("use_area_photo", True):
             photo = card.find_location_photo(story["location"], story["headline"])
         card.render(story["headline"], story["tag"], story["source_name"], story["location"],
-                    os.path.join(config.ROOT, rel), photo, credit)
-        story["card"] = rel
-        self.rendered_this_run.add(story["id"])
+                    out_path, photo, credit)
+        story["card"] = out_path
+        return out_path
+
+    def store_photo(self, story, download, credit, photo_from=None):
+        """download(path) saves the photo; it is then kept encrypted, never in the clear."""
+        plain = work_path(f"{story['id']}-download.jpg")
+        download(plain)
+        story.update(photo=vault.store_photo(plain, story["id"]), photo_credit=credit, photo_from=photo_from)
 
     # --- drafts ------------------------------------------------------------
     def create_story(self, item, draft, update_of=None, photo_msg=None, photo_url=None):
@@ -107,11 +131,9 @@ class Bot:
         if photo_msg:
             self.attach_photo(story, photo_msg, credit=item["source_name"])  # also renders the card
         elif photo_url:
-            rel = f"cards/{sid}-photo.jpg"
             try:
-                telegram.download_url(photo_url, os.path.join(config.ROOT, rel))
-                story.update(photo=rel, photo_from=0,
-                             photo_credit="Reader photo" if item.get("reader") else item["source_name"])
+                credit = "Reader photo" if item.get("reader") else item["source_name"]
+                self.store_photo(story, lambda p: telegram.download_url(photo_url, p), credit, photo_from=0)
             except Exception as exc:
                 self.log(f"    photo download failed: {exc}")
             self.render_card(story)
@@ -143,6 +165,8 @@ class Bot:
             lines.append(story["items"][0]["link"])
         header = "\n".join(lines) + "\n\n"
 
+        if not story.get("card") or not os.path.exists(story["card"]):
+            self.render_card(story)  # the work folder is wiped between runs
         if not self.telegram_on:
             self.log(f"\n--- DRAFT {story['id']} [{story['tag']}] ---\n{header}{story['caption']}\n"
                      f"card: {story['card']}")
@@ -153,7 +177,7 @@ class Bot:
         photo_options = [(i, it["source_name"]) for i, it in enumerate(story["items"])
                          if it.get("image") and story.get("photo_from") != i]
         buttons = telegram.draft_buttons(story["id"], photo_options)
-        path = os.path.join(config.ROOT, story["card"])
+        path = story["card"]
         full = header + story["caption"]
         if len(full) <= 1024:
             msg = telegram.send_photo(path, full, buttons)
@@ -200,13 +224,13 @@ class Bot:
         elif action == "photo" and story["status"] in ("pending", "failed"):
             telegram.answer_callback(cq["id"], "Adding photo…")
             item = story["items"][int(extra)]
-            rel = f"cards/{story['id']}-photo.jpg"
             try:
-                telegram.download_url(item["image"], os.path.join(config.ROOT, rel))
+                self.store_photo(story, lambda p: telegram.download_url(item["image"], p),
+                                 item["source_name"], photo_from=int(extra))
             except Exception as exc:
                 telegram.send_text(f"⚠️ Couldn't download that photo: {exc}", reply_to=story["msg_ids"][0])
                 return
-            story.update(photo=rel, photo_credit=item["source_name"], photo_from=int(extra), status="pending")
+            story["status"] = "pending"
             self.render_card(story)
             self.send_draft(story)
         elif action == "edit" and story["status"] in ("pending", "failed"):
@@ -265,9 +289,7 @@ class Bot:
         self.manual_story(text)
 
     def attach_photo(self, story, msg, credit):
-        rel = f"cards/{story['id']}-photo.jpg"
-        telegram.download_photo(msg, os.path.join(config.ROOT, rel))
-        story["photo"], story["photo_credit"], story["photo_from"] = rel, credit, None
+        self.store_photo(story, lambda p: telegram.download_photo(msg, p), credit)
         self.render_card(story)
 
     def manual_story(self, text, photo_msg=None):
@@ -290,15 +312,19 @@ class Bot:
     # --- publishing ----------------------------------------------------------
     def publish_approved(self):
         for story in self.stories.values():
-            if story["status"] != "approved" or story["id"] in self.rendered_this_run:
-                continue  # a card re-rendered this run gets posted on the next run
+            if story["status"] != "approved":
+                continue
             if not (config.IG_USER_ID and config.IG_ACCESS_TOKEN and config.IMAGE_BASE_URL):
                 story["status"] = "failed"
                 telegram.send_text("⚠️ Instagram isn't set up yet (IG_USER_ID / IG_ACCESS_TOKEN missing).",
                                    reply_to=story["msg_ids"][0])
                 continue
-            image_url = f"{config.IMAGE_BASE_URL}/{story['card']}"
             try:
+                # Only now does the card go online - Instagram downloads it from the public repo.
+                public = self.render_card(story, os.path.join(config.CARDS_DIR, f"{story['id']}.jpg"))
+                make_public(public)
+                image_url = f"{config.IMAGE_BASE_URL}/cards/{story['id']}.jpg"
+                wait_until_online(image_url)
                 link = instagram.publish(image_url, story["caption"])
                 story.update(status="posted", posted=now().isoformat(), permalink=link)
                 telegram.clear_buttons(story["msg_ids"][0])
@@ -401,11 +427,18 @@ class Bot:
         for sid, story in list(self.stories.items()):
             if datetime.fromisoformat(story["created"]) < card_cutoff and story["status"] != "approved":
                 del self.stories[sid]
-        keep = {st["card"] for st in self.stories.values()}
-        keep |= {st["photo"] for st in self.stories.values() if st.get("photo")}
+        keep_photos = {os.path.basename(st["photo"]) for st in self.stories.values() if st.get("photo")}
+        if os.path.isdir(config.PRIVATE_DIR):
+            for name in os.listdir(config.PRIVATE_DIR):
+                if name.endswith(".enc") and name not in keep_photos:
+                    os.remove(os.path.join(config.PRIVATE_DIR, name))
+        # Instagram keeps its own copy once posted, so public cards only need to live briefly.
+        public_cutoff = (now() - timedelta(days=config.PUBLIC_CARD_DAYS)).isoformat()
+        keep_cards = {f"{st['id']}.jpg" for st in self.stories.values()
+                      if st["status"] in ("approved", "failed") or st.get("posted", "") >= public_cutoff}
         if os.path.isdir(config.CARDS_DIR):
             for name in os.listdir(config.CARDS_DIR):
-                if f"cards/{name}" not in keep and name != ".gitkeep" and name != "test.jpg":
+                if name.endswith(".jpg") and name not in keep_cards and not name.startswith("test"):
                     os.remove(os.path.join(config.CARDS_DIR, name))
         seen_cutoff = (now() - timedelta(days=config.SEEN_RETENTION_DAYS)).isoformat()
         self.s["seen"] = {k: v for k, v in self.s["seen"].items() if v >= seen_cutoff}
@@ -428,13 +461,16 @@ def main(argv):
         return
 
     dry_run = "--dry-run" in argv
-    state = load_state()
     if dry_run:
+        from cryptography.fernet import Fernet
+        config.STATE_KEY = config.STATE_KEY or Fernet.generate_key().decode()  # throwaway; nothing is saved
         state = {"seeded": [s["id"] for s in config.SOURCES]}  # treat everything as new
+    else:
+        state = vault.load_state()
     bot = Bot(state, dry_run=dry_run)
     bot.run()
     if not dry_run:
-        save_state(state)
+        vault.save_state(state)
 
 
 if __name__ == "__main__":

@@ -14,7 +14,7 @@ Nothing goes on Instagram until you approve it.
 
 ## Setup (about 45 minutes, one time only)
 
-You'll collect 6 secrets. Keep them in a private note as you go and **never share them with anyone, including in chat.**
+You'll collect 7 secrets. Keep them in a private note as you go and **never share them with anyone, including in chat.**
 
 | Secret | Where it comes from |
 |---|---|
@@ -24,6 +24,7 @@ You'll collect 6 secrets. Keep them in a private note as you go and **never shar
 | `IG_ACCESS_TOKEN` | Step 2 |
 | `ANTHROPIC_API_KEY` | Step 3 |
 | `IG_PAGE_ID` | Step 2 (only needed for DM tips) |
+| `STATE_KEY` | Step 4 |
 
 ### Step 1 – Telegram bot
 1. In Telegram, open **@BotFather** → send `/newbot` → pick a name (e.g. *imjustsheff drafts*) and a username ending in `bot`.
@@ -72,7 +73,10 @@ The captions are a bit plainer but still good. If you leave the key out entirely
 3. Upload this folder. Easiest: install **GitHub Desktop** → *File → Add local repository* → choose this folder → **Publish**.
    (Or click **uploading an existing file** on the repo page and drag in everything except `.venv`.)
 4. In the repo: **Settings → Secrets and variables → Actions**:
-   - **Secrets** tab → *New repository secret*, once for each of the 5 secrets above.
+   - Make your `STATE_KEY`: in this folder run `.venv\Scripts\python -m bot.vault --new-key`
+     (or ask a friend with Python). It encrypts the bot's memory, so followers' DMs are never readable in the
+     public repo. **If you lose it, the bot just starts fresh. Never post it anywhere.**
+   - **Secrets** tab → *New repository secret*, once for each of the 7 secrets above.
    - **Variables** tab (optional): `CLAUDE_MODEL` = `claude-haiku-5-5` to save money. `GRAPH_API_VERSION` is only needed
      if Meta deprecates the default (`v23.0`); use the newest version shown in Graph API Explorer.
 5. **Actions** tab → enable workflows → **imjustsheff bot** → **Run workflow**.
