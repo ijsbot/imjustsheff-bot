@@ -61,8 +61,9 @@ You don't need App Review. In development mode the app can post to accounts you 
    Set a **monthly spend limit** too.
 2. **API Keys** → Create key. That's `ANTHROPIC_API_KEY`.
 
-**Cost:** the bot uses `claude-opus-5-5` (best captions). With around 30–60 new stories a day, that's
-roughly **£5–15 a month**. For pennies instead, set the variable `CLAUDE_MODEL` to `claude-haiku-5-5` in Step 4.
+**Cost:** roughly 1.5–2p per story with `claude-opus-5-5` (best captions). With around 30–60 new stories a day,
+that's about **£10–30 a month**. Set the variable `CLAUDE_MODEL` to `claude-haiku-5-5` in Step 4 and it's
+**under £1 a month**. Either way, the monthly spend limit in the Anthropic console is a hard cap.
 The captions are a bit plainer but still good. If you leave the key out entirely, the bot still works with free template captions.
 
 ### Step 4 – GitHub (runs the bot for free)
