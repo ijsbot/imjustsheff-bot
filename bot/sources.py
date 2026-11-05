@@ -23,7 +23,23 @@ def _uid(source_id, key):
     return source_id + ":" + hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
 
 
-def _item(source, key, title, summary, link, published=None):
+def _image_url(entry):
+    """Largest image a feed entry offers, or ''."""
+    candidates = []
+    for m in entry.get("media_content", []) + entry.get("media_thumbnail", []):
+        if m.get("url") and m.get("medium", "image") == "image":
+            candidates.append((int(m.get("width") or 0), m["url"]))
+    for enc in entry.get("enclosures", []):
+        if enc.get("type", "").startswith("image/") and enc.get("href"):
+            candidates.append((0, enc["href"]))
+    if not candidates:
+        return ""
+    url = max(candidates)[1]
+    # BBC thumbnails are 240px; the same image is served larger on this path.
+    return re.sub(r"(ichef\.bbci\.co\.uk/ace/standard/)\d+/", r"\g<1>976/", url)
+
+
+def _item(source, key, title, summary, link, published=None, image=""):
     return {
         "uid": _uid(source["id"], key),
         "source_id": source["id"],
@@ -32,6 +48,7 @@ def _item(source, key, title, summary, link, published=None):
         "summary": _clean(summary)[:1500],
         "link": (link or "").strip(),
         "published": published,
+        "image": image,
         "official": bool(source.get("official")),
         "media": bool(source.get("media")),
     }
@@ -48,7 +65,8 @@ def _fetch_rss(source):
         if stamp:
             published = datetime(*stamp[:6], tzinfo=timezone.utc).isoformat()
         key = e.get("id") or e.get("link") or e.get("title", "")
-        items.append(_item(source, key, e.get("title", ""), e.get("summary", ""), e.get("link", ""), published))
+        items.append(_item(source, key, e.get("title", ""), e.get("summary", ""), e.get("link", ""),
+                           published, _image_url(e)))
     return items
 
 

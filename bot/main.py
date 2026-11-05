@@ -18,8 +18,10 @@ HELP = (
     "New stories arrive here as drafts. Tap ✅ Post, ✏️ Edit or ❌ Skip.\n\n"
     "Editing: tap ✏️ (or reply to a draft) and send the new caption. "
     "Start your message with 'headline:' to change the text on the image instead.\n\n"
-    "Manual story: send a message with the headline on the first line, details below, "
-    "an optional link, and optionally a last line like 'Source: South Yorkshire Police'."
+    "Photos: reply to a draft with a photo (e.g. a police appeal or CCTV image) and the card is rebuilt "
+    "around it. Add a caption to set the image credit. Reply 'no photo' to go back to a text-only card.\n\n"
+    "Manual story: send a message (or a photo with a caption) with the headline on the first line, "
+    "details below, an optional link, and optionally a last line like 'Source: South Yorkshire Police'."
 )
 
 
@@ -73,13 +75,19 @@ class Bot:
     def render_card(self, story):
         story["card_version"] = story.get("card_version", 0) + 1
         rel = f"cards/{story['id']}-{story['card_version']}.jpg"
+        # A photo you sent for this story wins; otherwise one of your own area photos.
+        photo, credit = None, None
+        if story.get("photo"):
+            photo, credit = os.path.join(config.ROOT, story["photo"]), story.get("photo_credit")
+        elif story.get("use_area_photo", True):
+            photo = card.find_location_photo(story["location"], story["headline"])
         card.render(story["headline"], story["tag"], story["source_name"], story["location"],
-                    os.path.join(config.ROOT, rel))
+                    os.path.join(config.ROOT, rel), photo, credit)
         story["card"] = rel
         self.rendered_this_run.add(story["id"])
 
     # --- drafts ------------------------------------------------------------
-    def create_story(self, item, draft, update_of=None):
+    def create_story(self, item, draft, update_of=None, photo_msg=None):
         sid = hashlib.sha1((item["uid"] + now().isoformat()).encode()).hexdigest()[:8]
         story = {
             "id": sid,
@@ -96,7 +104,10 @@ class Bot:
             "update_of": update_of,
             "msg_ids": [],
         }
-        self.render_card(story)
+        if photo_msg:
+            self.attach_photo(story, photo_msg, credit=item["source_name"])  # also renders the card
+        else:
+            self.render_card(story)
         self.stories[sid] = story
         self.send_draft(story)
         return story
@@ -123,7 +134,9 @@ class Bot:
 
         for mid in story.get("msg_ids", [])[:1]:
             telegram.clear_buttons(mid)
-        buttons = telegram.draft_buttons(story["id"])
+        photo_options = [(i, it["source_name"]) for i, it in enumerate(story["items"])
+                         if it.get("image") and story.get("photo_from") != i]
+        buttons = telegram.draft_buttons(story["id"], photo_options)
         path = os.path.join(config.ROOT, story["card"])
         full = header + story["caption"]
         if len(full) <= 1024:
@@ -156,6 +169,7 @@ class Bot:
         if not self.from_owner(cq.get("message", {}).get("chat", {})):
             return
         action, _, sid = cq.get("data", "").partition(":")
+        sid, _, extra = sid.partition(":")
         story = self.stories.get(sid)
         if not story:
             telegram.answer_callback(cq["id"], "That draft has expired.")
@@ -167,6 +181,18 @@ class Bot:
             story["status"] = "skipped"
             telegram.answer_callback(cq["id"], "Skipped")
             telegram.clear_buttons(cq["message"]["message_id"])
+        elif action == "photo" and story["status"] in ("pending", "failed"):
+            telegram.answer_callback(cq["id"], "Adding photo…")
+            item = story["items"][int(extra)]
+            rel = f"cards/{story['id']}-photo.jpg"
+            try:
+                telegram.download_url(item["image"], os.path.join(config.ROOT, rel))
+            except Exception as exc:
+                telegram.send_text(f"⚠️ Couldn't download that photo: {exc}", reply_to=story["msg_ids"][0])
+                return
+            story.update(photo=rel, photo_credit=item["source_name"], photo_from=int(extra), status="pending")
+            self.render_card(story)
+            self.send_draft(story)
         elif action == "edit" and story["status"] in ("pending", "failed"):
             self.s["awaiting_edit"] = sid
             telegram.answer_callback(cq["id"])
@@ -178,9 +204,7 @@ class Bot:
     def on_message(self, msg):
         if not self.from_owner(msg.get("chat", {})):
             return
-        text = (msg.get("text") or "").strip()
-        if not text:
-            return
+        text = (msg.get("text") or msg.get("caption") or "").strip()
         if text.startswith("/"):
             telegram.send_text(HELP)
             return
@@ -190,6 +214,27 @@ class Bot:
         if not story and self.s["awaiting_edit"]:
             story = self.stories.get(self.s["awaiting_edit"])
         self.s["awaiting_edit"] = None
+
+        if msg.get("photo"):
+            if story and story["status"] in ("pending", "failed"):
+                self.attach_photo(story, msg, credit=text or story["source_name"])
+                story["status"] = "pending"
+                self.send_draft(story)
+            elif text:
+                self.manual_story(text, photo_msg=msg)
+            else:
+                telegram.send_text("To add a photo, reply to a draft with it. To start a new story, "
+                                   "send the photo with the headline as its caption.")
+            return
+
+        if not text:
+            return
+        if text.lower() in ("no photo", "nophoto", "remove photo") and story:
+            story.pop("photo", None)
+            story["use_area_photo"] = False
+            self.render_card(story)
+            self.send_draft(story)
+            return
 
         if story and story["status"] in ("pending", "failed"):
             if text.lower().startswith("headline:"):
@@ -203,7 +248,13 @@ class Bot:
 
         self.manual_story(text)
 
-    def manual_story(self, text):
+    def attach_photo(self, story, msg, credit):
+        rel = f"cards/{story['id']}-photo.jpg"
+        telegram.download_photo(msg, os.path.join(config.ROOT, rel))
+        story["photo"], story["photo_credit"], story["photo_from"] = rel, credit, None
+        self.render_card(story)
+
+    def manual_story(self, text, photo_msg=None):
         lines = [l.strip() for l in text.splitlines() if l.strip()]
         source_name = "imjustsheff"
         if len(lines) > 1 and lines[-1].lower().startswith("source:"):
@@ -218,7 +269,7 @@ class Bot:
             "link": link, "published": None, "official": True, "media": False,
         }
         draft = writer.draft_for(item, self.recent_stories(), self.log)
-        self.create_story(item, draft)
+        self.create_story(item, draft, photo_msg=photo_msg)
 
     # --- publishing ----------------------------------------------------------
     def publish_approved(self):
@@ -279,8 +330,13 @@ class Bot:
             match["items"].append(item)
             self.log(f"    same story as {match['id']} ({match['status']})")
             if match["status"] == "pending" and self.telegram_on:
+                buttons = None
+                if item.get("image"):
+                    index = len(match["items"]) - 1
+                    buttons = {"inline_keyboard": [[{"text": f"📷 Use {item['source_name']} photo",
+                                                     "callback_data": f"photo:{match['id']}:{index}"}]]}
                 telegram.send_text(f"➕ Also reported by {item['source_name']}: {item['title']}\n{item['link']}",
-                                   reply_to=match["msg_ids"][0])
+                                   reply_to=match["msg_ids"][0], buttons=buttons)
             return
 
         if not draft["newsworthy"] and not item["official"]:
@@ -297,6 +353,7 @@ class Bot:
             if datetime.fromisoformat(story["created"]) < card_cutoff and story["status"] != "approved":
                 del self.stories[sid]
         keep = {st["card"] for st in self.stories.values()}
+        keep |= {st["photo"] for st in self.stories.values() if st.get("photo")}
         if os.path.isdir(config.CARDS_DIR):
             for name in os.listdir(config.CARDS_DIR):
                 if f"cards/{name}" not in keep and name != ".gitkeep" and name != "test.jpg":

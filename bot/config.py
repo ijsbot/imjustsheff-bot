@@ -167,3 +167,4 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATE_PATH = os.path.join(ROOT, "state.json")
 CARDS_DIR = os.path.join(ROOT, "cards")
 FONTS_DIR = os.path.join(ROOT, "fonts")
+PHOTOS_DIR = os.path.join(ROOT, "photos")  # your own area photos, e.g. photos/sheffield.jpg

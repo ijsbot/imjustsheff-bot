@@ -20,17 +20,41 @@ def _call(method, files=None, **params):
     return data["result"]
 
 
+def download_photo(message, path):
+    """Save the largest size of a photo message to path."""
+    file_id = message["photo"][-1]["file_id"]
+    file_path = _call("getFile", file_id=file_id)["file_path"]
+    url = f"https://api.telegram.org/file/bot{config.TELEGRAM_BOT_TOKEN}/{file_path}"
+    resp = requests.get(url, timeout=60)
+    resp.raise_for_status()
+    with open(path, "wb") as fh:
+        fh.write(resp.content)
+    return path
+
+
 def get_updates(offset):
     return _call("getUpdates", offset=offset, timeout=0,
                  allowed_updates=["message", "callback_query"])
 
 
-def draft_buttons(story_id):
-    return {"inline_keyboard": [[
+def draft_buttons(story_id, photo_options=()):
+    """photo_options: [(item_index, source_name)] for items that have an article photo."""
+    rows = [[
         {"text": "✅ Post", "callback_data": f"post:{story_id}"},
         {"text": "✏️ Edit", "callback_data": f"edit:{story_id}"},
         {"text": "❌ Skip", "callback_data": f"skip:{story_id}"},
-    ]]}
+    ]]
+    for index, source_name in photo_options:
+        rows.append([{"text": f"📷 Use {source_name} photo", "callback_data": f"photo:{story_id}:{index}"}])
+    return {"inline_keyboard": rows}
+
+
+def download_url(url, path):
+    resp = requests.get(url, timeout=60, headers={"User-Agent": "imjustsheff-news-bot/1.0"})
+    resp.raise_for_status()
+    with open(path, "wb") as fh:
+        fh.write(resp.content)
+    return path
 
 
 def send_photo(path, caption, buttons=None, reply_to=None):

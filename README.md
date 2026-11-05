@@ -83,7 +83,14 @@ From the next run on (within 10 minutes), new stories arrive in Telegram.
 - **✏️ Edit:** send the new caption. Start your message with `headline:` to change the text on the image instead.
   You can also just **reply** to any draft with new text.
 - **❌ Skip:** the draft is dropped.
-- **Manual post:** send the bot a message. Put the headline on the first line and the details underneath. You can add a link
+- **📷 Use … photo:** shown when a news outlet's article has a photo. It puts that photo on the card with
+  "Image: <outlet>" printed on it. Credit is good practice but **not permission**. UK fair dealing for news doesn't
+  cover photographs, and agency photos (PA, Getty) are actively enforced, so it's your call each time.
+- **Your own photo:** reply to a draft with a photo, e.g. a police appeal or CCTV image (released for sharing).
+  Add a caption to set the credit (default: the story's source). Reply `no photo` for a text-only card.
+- **Area photos:** put your own photos in `photos/` named after places (`sheffield.jpg`, `page-hall.jpg`,
+  `south-yorkshire.jpg` as the default). They're used automatically when a story has no other photo.
+- **Manual post:** send the bot a message (or a photo with the story as its caption). Put the headline on the first line and the details underneath. You can add a link
   and a last line like `Source: South Yorkshire Police`. Use this for stories you see on Facebook.
 - **📰 TIP** drafts come from newspapers. The caption is rewritten in your own words and credited, but check the facts.
 - **🔁 UPDATE** drafts are new developments on a story you've already covered.
