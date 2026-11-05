@@ -11,7 +11,7 @@ import re
 import sys
 from datetime import datetime, timedelta, timezone
 
-from . import card, config, instagram, sources, telegram, writer
+from . import card, config, instagram, instagram_dms, sources, telegram, writer
 
 HELP = (
     "👋 imjustsheff bot\n\n"
@@ -87,7 +87,7 @@ class Bot:
         self.rendered_this_run.add(story["id"])
 
     # --- drafts ------------------------------------------------------------
-    def create_story(self, item, draft, update_of=None, photo_msg=None):
+    def create_story(self, item, draft, update_of=None, photo_msg=None, photo_url=None):
         sid = hashlib.sha1((item["uid"] + now().isoformat()).encode()).hexdigest()[:8]
         story = {
             "id": sid,
@@ -106,6 +106,15 @@ class Bot:
         }
         if photo_msg:
             self.attach_photo(story, photo_msg, credit=item["source_name"])  # also renders the card
+        elif photo_url:
+            rel = f"cards/{sid}-photo.jpg"
+            try:
+                telegram.download_url(photo_url, os.path.join(config.ROOT, rel))
+                story.update(photo=rel, photo_from=0,
+                             photo_credit="Reader photo" if item.get("reader") else item["source_name"])
+            except Exception as exc:
+                self.log(f"    photo download failed: {exc}")
+            self.render_card(story)
         else:
             self.render_card(story)
         self.stories[sid] = story
@@ -117,6 +126,13 @@ class Bot:
         lines = [f"{src.get('emoji', '📝')} {story['source_name']}"]
         if story["media"]:
             lines.append("📰 TIP from a news outlet - check the facts before posting")
+        first = story["items"][0]
+        if first.get("reader"):
+            lines.append(f"💬 DM from @{first['sender']} - UNVERIFIED, check before posting")
+            if first["summary"]:
+                lines.append(f"Their message: {first['summary'][:300]}")
+            if first.get("extra_images"):
+                lines.append(f"(+{first['extra_images']} more photo(s) in the DM)")
         if story.get("update_of") and story["update_of"] in self.stories:
             old = self.stories[story["update_of"]]
             lines.append(f"🔁 UPDATE to: {old['headline']} ({old['status']})")
@@ -321,6 +337,39 @@ class Bot:
             except Exception as exc:
                 self.log(f"  Failed on '{item['title']}': {exc}")
 
+    def check_dms(self):
+        if not (config.IG_PAGE_ID and config.IG_ACCESS_TOKEN):
+            return
+        try:
+            if "ig_dms" not in self.s["seeded"]:
+                for mid in instagram_dms.all_message_ids():
+                    self.s["seen"][mid] = now().isoformat()
+                self.s["seeded"].append("ig_dms")
+                self.log("Instagram DMs: first run - existing messages marked as seen")
+                return
+            tips = instagram_dms.new_tips(self.s["seen"])
+        except Exception as exc:
+            self.log(f"Instagram DMs: FAILED ({exc})")
+            return
+        self.log(f"Instagram DMs: {len(tips)} new tip(s)")
+        for tip in tips:
+            for mid in tip["msg_ids"]:
+                self.s["seen"]["dm:" + mid] = now().isoformat()
+            text = tip["text"]
+            first_line = text.splitlines()[0] if text else "Photo sent in by a follower"
+            item = {
+                "uid": "dm:" + tip["msg_ids"][0], "source_id": "ig_dms", "source_name": "Reader tip",
+                "title": first_line[:150], "summary": text[:1500], "link": "", "published": None,
+                "official": False, "media": False, "reader": True, "sender": tip["username"],
+                "image": tip["images"][0] if tip["images"] else "",
+                "extra_images": max(0, len(tip["images"]) - 1),
+            }
+            try:
+                draft = writer.draft_for(item, self.recent_stories(), self.log)
+                self.create_story(item, draft, photo_url=tip["images"][0] if tip["images"] else None)
+            except Exception as exc:
+                self.log(f"  Failed on DM tip: {exc}")
+
     def process_item(self, item):
         self.log(f"  [{item['source_name']}] {item['title']}")
         draft = writer.draft_for(item, self.recent_stories(), self.log)
@@ -364,6 +413,7 @@ class Bot:
     def run(self):
         self.handle_updates()
         self.publish_approved()
+        self.check_dms()
         self.check_sources()
         self.cleanup()
 

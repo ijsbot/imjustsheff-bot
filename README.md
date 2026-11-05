@@ -14,7 +14,7 @@ Nothing goes on Instagram until you approve it.
 
 ## Setup (about 45 minutes, one time only)
 
-You'll collect 5 secrets. Keep them in a private note as you go and **never share them with anyone, including in chat.**
+You'll collect 6 secrets. Keep them in a private note as you go and **never share them with anyone, including in chat.**
 
 | Secret | Where it comes from |
 |---|---|
@@ -23,6 +23,7 @@ You'll collect 5 secrets. Keep them in a private note as you go and **never shar
 | `IG_USER_ID` | Step 2 |
 | `IG_ACCESS_TOKEN` | Step 2 |
 | `ANTHROPIC_API_KEY` | Step 3 |
+| `IG_PAGE_ID` | Step 2 (only needed for DM tips) |
 
 ### Step 1 – Telegram bot
 1. In Telegram, open **@BotFather** → send `/newbot` → pick a name (e.g. *imjustsheff drafts*) and a username ending in `bot`.
@@ -40,13 +41,17 @@ Your Instagram account must be a **Business or Creator** account **linked to a F
 3. Open **Tools → Graph API Explorer**:
    - Select your app. Under *User or Page*, choose **Get User Access Token**.
    - Tick these permissions: `instagram_basic`, `instagram_content_publish`, `pages_show_list`,
-     `pages_read_engagement`, `business_management`. Then click **Generate Access Token** and allow access.
+     `pages_read_engagement`, `business_management`, plus `instagram_manage_messages` and
+     `pages_manage_metadata` for DM tips. Then click **Generate Access Token** and allow access.
 4. Make that token long-lived: go to **Tools → Access Token Debugger**, paste the token, and click **Extend Access Token**.
    Copy the new token.
 5. Back in Graph API Explorer, paste the long-lived token into the token box. Then run:
    - `me/accounts`: find your Page and copy its `access_token`. **That Page token is `IG_ACCESS_TOKEN`.**
      A Page token made from a long-lived user token doesn't expire.
    - `<your-page-id>?fields=instagram_business_account`: the `id` inside is **`IG_USER_ID`**.
+     The page id you used here is **`IG_PAGE_ID`**.
+6. For DM tips: in the Instagram app go to **Settings → Messages and story replies → Message controls →
+   Connected tools → Allow access to messages** and turn it on.
 
 You don't need App Review. In development mode the app can post to accounts you manage.
 
@@ -90,6 +95,11 @@ From the next run on (within 10 minutes), new stories arrive in Telegram.
   Add a caption to set the credit (default: the story's source). Reply `no photo` for a text-only card.
 - **Area photos:** put your own photos in `photos/` named after places (`sheffield.jpg`, `page-hall.jpg`,
   `south-yorkshire.jpg` as the default). They're used automatically when a story has no other photo.
+- **💬 DM tips:** when a follower DMs the page (text, photos or both), the bot turns it into a draft. It's labelled
+  **UNVERIFIED** and shows their @username and message to you only. The caption is written as "reports of…",
+  never names the sender, and credits "Sent in by a follower". Their photo goes on the card as "Image: Reader photo".
+  Several messages from the same person since the last check are combined into one draft.
+  Check tips before posting. If you can, confirm with the police, council or a second source.
 - **Manual post:** send the bot a message (or a photo with the story as its caption). Put the headline on the first line and the details underneath. You can add a link
   and a last line like `Source: South Yorkshire Police`. Use this for stories you see on Facebook.
 - **📰 TIP** drafts come from newspapers. The caption is rewritten in your own words and credited, but check the facts.

@@ -130,4 +130,4 @@ def source_by_id(source_id):
     for s in config.SOURCES:
         if s["id"] == source_id:
             return s
-    return {"id": source_id, "name": source_id, "emoji": "📝"}
+    return {"id": source_id, "name": source_id, "emoji": "💬" if source_id == "ig_dms" else "📝"}

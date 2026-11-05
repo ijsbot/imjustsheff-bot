@@ -149,6 +149,8 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 IG_USER_ID = os.environ.get("IG_USER_ID", "")
 IG_ACCESS_TOKEN = os.environ.get("IG_ACCESS_TOKEN", "")
+# Facebook Page linked to the Instagram account - needed to read Instagram DMs (tips from followers).
+IG_PAGE_ID = os.environ.get("IG_PAGE_ID", "")
 GRAPH_API_VERSION = os.environ.get("GRAPH_API_VERSION") or "v23.0"
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
