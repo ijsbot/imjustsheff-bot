@@ -2,7 +2,8 @@ name: imjustsheff bot
 
 on:
   schedule:
-    - cron: "*/5 * * * *"    # every 5 minutes - GitHub's minimum (it may run a few minutes late)
+    # Every 5 minutes (GitHub's minimum), offset from :00 because GitHub drops many on-the-hour runs.
+    - cron: "2-59/5 * * * *"
   workflow_dispatch:          # "Run workflow" button for testing
 
 # Never run two copies at once - they would fight over state.json.
