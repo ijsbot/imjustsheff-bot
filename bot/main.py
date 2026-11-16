@@ -23,6 +23,8 @@ HELP = (
     "Start your message with 'headline:' to change the text on the image instead.\n\n"
     "Photos: reply to a draft with a photo (e.g. a police appeal or CCTV image) and the card is rebuilt "
     "around it. Add a caption to set the image credit. Reply 'no photo' to go back to a text-only card.\n\n"
+    "Sensitive stories (deaths, sexual offences, children) get a muted card without pink. Reply "
+    "'sensitive' or 'not sensitive' to a draft to switch it.\n\n"
     "Manual story: send a message (or a photo with a caption) with the headline on the first line, "
     "details below, an optional link, and optionally a last line like 'Source: South Yorkshire Police'."
 )
@@ -100,7 +102,8 @@ class Bot:
         elif story.get("use_area_photo", True):
             photo = card.find_location_photo(story["location"], story["headline"])
         card.render(story["headline"], story["tag"], story["source_name"], story["location"],
-                    out_path, photo, credit, highlight=story.get("highlight"))
+                    out_path, photo, credit, highlight=story.get("highlight"),
+                    sensitive=story.get("sensitive", False))
         story["card"] = out_path
         return out_path
 
@@ -122,6 +125,7 @@ class Bot:
             "caption": draft["caption"],
             "location": draft["location"],
             "highlight": draft.get("highlight", ""),
+            "sensitive": draft.get("sensitive", False),
             "source_id": item["source_id"],
             "source_name": item["source_name"],
             "media": item["media"],
@@ -147,6 +151,8 @@ class Bot:
     def send_draft(self, story):
         src = sources.source_by_id(story["source_id"])
         lines = [f"{src.get('emoji', '📝')} {story['source_name']}"]
+        if story.get("sensitive"):
+            lines.append("🕊️ Sensitive style (no pink) - reply 'not sensitive' to switch")
         if story["media"]:
             lines.append("📰 TIP from a news outlet - check the facts before posting")
         first = story["items"][0]
@@ -279,6 +285,11 @@ class Bot:
         if text.lower() in ("no photo", "nophoto", "remove photo") and story:
             story.pop("photo", None)
             story["use_area_photo"] = False
+            self.render_card(story)
+            self.send_draft(story)
+            return
+        if text.lower() in ("sensitive", "not sensitive") and story:
+            story["sensitive"] = text.lower() == "sensitive"
             self.render_card(story)
             self.send_draft(story)
             return

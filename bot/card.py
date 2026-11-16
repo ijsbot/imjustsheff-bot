@@ -19,6 +19,9 @@ SLANT = 0.21  # parallelogram lean, matching the logo's italic
 INK = (6, 10, 28)
 NAVY = (14, 26, 70)
 WHITE = (255, 255, 255)
+# Sensitive mode (deaths, tributes, serious injuries, sexual offences, children): no hot pink.
+SLATE = (52, 58, 78)
+SOFT_GREY = (150, 156, 172)
 
 FONT = os.path.join(config.FONTS_DIR, "Montserrat-Italic.ttf")
 LOGO = os.path.join(config.ASSETS_DIR, "logo-news.png")
@@ -77,13 +80,14 @@ def _photo_background(path):
     return img
 
 
-def _night_background():
+def _night_background(sensitive=False):
     """No photo: navy night sky, the logo's skyline enlarged and softened, pink glow."""
     sky = Image.linear_gradient("L").resize((W, H))
     img = Image.composite(Image.new("RGB", (W, H), INK), Image.new("RGB", (W, H), (16, 30, 82)), sky)
 
     glow = Image.radial_gradient("L").resize((W * 2, H)).crop((W // 2, 0, W * 3 // 2, H))
-    img.paste(Image.new("RGB", (W, H), (120, 20, 110)), (0, 0), glow.point(lambda v: max(0, 200 - v) * 60 // 200))
+    glow_colour = (40, 50, 90) if sensitive else (120, 20, 110)
+    img.paste(Image.new("RGB", (W, H), glow_colour), (0, 0), glow.point(lambda v: max(0, 200 - v) * 60 // 200))
 
     skyline = Image.open(LOGO).convert("RGBA").crop(SKYLINE_BOX)
     width = int(W * 1.25)
@@ -114,37 +118,41 @@ def _shadowed_text(img, xy, text, font, fill, shadow=(0, 0, 0, 170), offset=(4, 
     img.alpha_composite(layer)
 
 
-def _neon_rule(img, x, y, length):
+def _neon_rule(img, x, y, length, colour):
     layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
     d = ImageDraw.Draw(layer)
-    _parallelogram(d, x, y, length, 8, config.PINK + (255,))
+    _parallelogram(d, x, y, length, 8, colour + (255,))
     glow = layer.filter(ImageFilter.GaussianBlur(10))
     img.alpha_composite(glow)
     img.alpha_composite(layer)
 
 
-def _tag_ribbon(img, x, y, tag, location):
+def _tag_ribbon(img, x, y, tag, location, sensitive=False):
     d = ImageDraw.Draw(img)
     font = _font(40)
     h = 64
     text_w = d.textlength(tag, font=font)
     w = int(text_w + 96)
-    _parallelogram(d, x, y, w, h, config.TAG_COLOURS.get(tag, config.PINK))
+    # Sensitive: white tag with dark text and a slate location plate - respectful, still on-brand.
+    tag_fill, tag_text = (WHITE, INK) if sensitive else (config.TAG_COLOURS.get(tag, config.PINK), WHITE)
+    loc_fill, loc_text = (SLATE, WHITE) if sensitive else (WHITE, INK)
+    _parallelogram(d, x, y, w, h, tag_fill)
     # Play-button triangle, like the logo's "> NEWS".
     tx, ty = x + 30, y + 18
-    d.polygon([(tx, ty), (tx + 24, ty + 14), (tx, ty + 28)], fill=WHITE)
-    d.text((x + 66, y + 9), tag, font=font, fill=WHITE)
+    d.polygon([(tx, ty), (tx + 24, ty + 14), (tx, ty + 28)], fill=tag_text)
+    d.text((x + 66, y + 9), tag, font=font, fill=tag_text)
     if location:
         loc_font = _font(34, b"ExtraBold Italic")
         lw = int(d.textlength(location.upper(), font=loc_font) + 52)
-        _parallelogram(d, x + w + 10, y, lw, h, WHITE)
-        d.text((x + w + 36, y + 13), location.upper(), font=loc_font, fill=INK)
+        _parallelogram(d, x + w + 10, y, lw, h, loc_fill)
+        d.text((x + w + 36, y + 13), location.upper(), font=loc_font, fill=loc_text)
 
 
-def _footer(img, source_name, photo_credit):
+def _footer(img, source_name, photo_credit, sensitive=False):
     d = ImageDraw.Draw(img)
-    # Slanted white strip with a pink edge, like the logo's tagline banner.
-    _parallelogram(d, M - 20, FOOTER_TOP - 6, W - 2 * M + 24, FOOTER_H + 12, config.PINK)
+    accent = SOFT_GREY if sensitive else config.PINK
+    # Slanted white strip with a coloured edge, like the logo's tagline banner.
+    _parallelogram(d, M - 20, FOOTER_TOP - 6, W - 2 * M + 24, FOOTER_H + 12, accent)
     _parallelogram(d, M - 14, FOOTER_TOP, W - 2 * M + 12, FOOTER_H, WHITE)
     small = _font(24, b"ExtraBold Italic")
     text = f"SOURCE: {source_name.upper()}"
@@ -156,7 +164,7 @@ def _footer(img, source_name, photo_credit):
     while d.textlength(text, font=small) > W - 2 * M - handle_w - 70 and len(text) > 10:
         text = text[:-2].rstrip() + "…"
     d.text((M + 18, FOOTER_TOP + 21), text, font=small, fill=INK)
-    d.text((W - M - handle_w - 10, FOOTER_TOP + 16), handle, font=handle_font, fill=config.PINK)
+    d.text((W - M - handle_w - 10, FOOTER_TOP + 16), handle, font=handle_font, fill=INK if sensitive else accent)
 
 
 # --- headline --------------------------------------------------------------------------
@@ -188,25 +196,30 @@ def _key(word):
     return re.sub(r"[^A-Z0-9]", "", word.upper())
 
 
-def _highlight_set(headline, highlight, location):
-    """Words to colour pink: the AI's pick, else the place name if it's in the headline."""
+def _highlight_positions(words, highlight, location):
+    """Positions of the words to colour pink: the first exact run of the AI's phrase in the
+    headline, else of the place name. Only that run - not every repeat of a word."""
+    keys = [_key(w) for w in words]
     for phrase in (highlight, location):
-        keys = {_key(w) for w in (phrase or "").split()} - {""}
-        if keys and keys & {_key(w) for w in headline.split()}:
-            return keys
+        target = [k for k in (_key(w) for w in (phrase or "").split()) if k]
+        n = len(target)
+        for i in range(len(keys) - n + 1) if n else ():
+            if keys[i:i + n] == target:
+                return set(range(i, i + n))
     return set()
 
 
-def _draw_headline(img, lines, font, line_h, top, pink_keys):
+def _draw_headline(img, lines, font, line_h, top, pink_positions):
     d = ImageDraw.Draw(img)
     space = d.textlength(" ", font=font)
-    y = top
+    y, index = top, 0
     for line in lines:
         x = M
         for word in line:
-            colour = config.PINK if _key(word) in pink_keys else WHITE
+            colour = config.PINK if index in pink_positions else WHITE
             _shadowed_text(img, (x, y), word, font, colour)
             x += d.textlength(word, font=font) + space
+            index += 1
         y += line_h
     return y
 
@@ -214,9 +227,10 @@ def _draw_headline(img, lines, font, line_h, top, pink_keys):
 # --- render ----------------------------------------------------------------------------
 
 def render(headline, tag, source_name, location, out_path, photo_path=None, photo_credit=None,
-           highlight=None):
+           highlight=None, sensitive=False):
+    """sensitive=True: muted white/slate/grey styling with no hot pink, for tragic stories."""
     has_photo = bool(photo_path and os.path.exists(photo_path))
-    img = (_photo_background(photo_path) if has_photo else _night_background())
+    img = (_photo_background(photo_path) if has_photo else _night_background(sensitive))
 
     # A light shade behind the corner logo, and a heavy one behind the headline.
     _vertical_fade(img, 0, 230, 150 if has_photo else 0, 0)
@@ -236,10 +250,11 @@ def render(headline, tag, source_name, location, out_path, photo_path=None, phot
     text_h = len(lines) * line_h
     head_top = FOOTER_TOP - 74 - text_h
 
-    _tag_ribbon(img, M, head_top - 96, tag, location)
-    bottom = _draw_headline(img, lines, font, line_h, head_top, _highlight_set(headline, highlight, location))
-    _neon_rule(img, M, bottom + 18, 300)
-    _footer(img, source_name, photo_credit if has_photo else None)
+    _tag_ribbon(img, M, head_top - 96, tag, location, sensitive)
+    pink = set() if sensitive else _highlight_positions(words, highlight, location)
+    bottom = _draw_headline(img, lines, font, line_h, head_top, pink)
+    _neon_rule(img, M, bottom + 18, 300, SOFT_GREY if sensitive else config.PINK)
+    _footer(img, source_name, photo_credit if has_photo else None, sensitive)
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     img.convert("RGB").save(out_path, "JPEG", quality=93)
