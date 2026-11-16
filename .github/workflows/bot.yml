@@ -54,5 +54,5 @@ jobs:
       - name: Save encrypted state
         if: always()
         run: |
-          git add -A state.enc private cards
+          for p in state.enc private cards; do [ -e "$p" ] && git add -A "$p"; done
           git diff --cached --quiet || (git commit -q -m "bot: update state" && git push -q)
