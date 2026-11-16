@@ -14,16 +14,17 @@ BLACK = (11, 11, 15)
 WHITE = (255, 255, 255)
 GREY = (160, 160, 170)
 RED = (230, 20, 40)
-BLUE = (30, 90, 255)
-PINK = (255, 30, 150)
+BLUE = (30, 120, 255)  # the blue at the end of "IMJUST" in the logo
+PINK = (255, 20, 160)  # the "SHEFF" pink
 
-# Colour of the tag pill on each card (tag is chosen per story).
+# Colour of the tag pill on each card (tag is chosen per story). Pink is the default look;
+# red flags the urgent ones.
 TAG_COLOURS = {
     "BREAKING": RED,
-    "APPEAL": BLUE,
+    "APPEAL": PINK,
     "MISSING": PINK,
     "WANTED": RED,
-    "UPDATE": PINK,
+    "UPDATE": BLUE,
     "COURT": BLUE,
     "WARNING": RED,
     "NEWS": PINK,
@@ -188,5 +189,6 @@ STATE_PATH = os.path.join(ROOT, "state.enc")
 CARDS_DIR = os.path.join(ROOT, "cards")      # public: only cards of approved posts (Instagram downloads them)
 PRIVATE_DIR = os.path.join(ROOT, "private")  # encrypted photos
 WORK_DIR = os.path.join(ROOT, "work")        # scratch space, never committed
-FONTS_DIR = os.path.join(ROOT, "fonts")
+FONTS_DIR = os.path.join(ROOT, "fonts")    # Bebas Neue + Oswald (free OFL fonts)
+ASSETS_DIR = os.path.join(ROOT, "assets")  # logo files
 PHOTOS_DIR = os.path.join(ROOT, "photos")  # your own area photos, e.g. photos/sheffield.jpg

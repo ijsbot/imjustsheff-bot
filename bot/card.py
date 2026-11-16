@@ -1,4 +1,9 @@
-"""Render the branded 1080x1350 headline card."""
+"""Render the branded 1080x1350 card ("design C").
+
+Top: the photo (or, with no photo, a dark panel with the Sheffield skyline from the logo).
+A brand stripe (grey -> black -> navy -> blue -> pink, like the logo lettering) splits it from
+a white panel holding the tag, a Bebas Neue headline, the source and the logo.
+"""
 import os
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
@@ -6,53 +11,33 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 from . import config
 
 W, H = 1080, 1350
-MARGIN = 80
+M = 70
+SPLIT = 700  # where the photo ends and the white panel starts
 
-FONT_CANDIDATES = [
-    os.path.join(config.FONTS_DIR, "bold.ttf"),  # drop your own brand font here
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-    "C:/Windows/Fonts/arialbd.ttf",
-    "/Library/Fonts/Arial Bold.ttf",
-]
-REGULAR_CANDIDATES = [
-    os.path.join(config.FONTS_DIR, "regular.ttf"),
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "C:/Windows/Fonts/arial.ttf",
-    "/Library/Fonts/Arial.ttf",
-]
+INK = (10, 10, 18)
+WHITE = (255, 255, 255)
+NAVY = (18, 38, 105)
+SOURCE_GREY = (110, 110, 120)
+
+BEBAS = os.path.join(config.FONTS_DIR, "BebasNeue-Regular.ttf")
+OSWALD = os.path.join(config.FONTS_DIR, "Oswald.ttf")
+LOGO = os.path.join(config.ASSETS_DIR, "logo-transparent.png")
+SKYLINE_BOX = (575, 0, 1155, 172)  # the skyline part of logo-transparent.png
 
 
-def _font(candidates, size):
-    for path in candidates:
-        if os.path.exists(path):
-            return ImageFont.truetype(path, size)
-    return ImageFont.load_default(size=size)
+def _bebas(size):
+    return ImageFont.truetype(BEBAS, size)
 
 
-def _wrap(draw, text, font, width):
-    lines, line = [], ""
-    for word in text.split():
-        trial = f"{line} {word}".strip()
-        if draw.textlength(trial, font=font) <= width:
-            line = trial
-        else:
-            if line:
-                lines.append(line)
-            line = word
-    if line:
-        lines.append(line)
-    return lines
+def _oswald(size, weight=b"Regular"):
+    font = ImageFont.truetype(OSWALD, size)
+    font.set_variation_by_name(weight)
+    return font
 
 
-def _fit_headline(draw, text, width, max_height, largest=104):
-    for size in range(largest, 43, -4):
-        font = _font(FONT_CANDIDATES, size)
-        lines = _wrap(draw, text, font, width)
-        line_h = int(size * 1.15)
-        if len(lines) * line_h <= max_height:
-            return font, lines, line_h
-    font = _font(FONT_CANDIDATES, 44)
-    return font, _wrap(draw, text, font, width), int(44 * 1.15)
+def _logo(height):
+    im = Image.open(LOGO).convert("RGBA")
+    return im.resize((round(im.width * height / im.height), height), Image.LANCZOS)
 
 
 def find_location_photo(*texts):
@@ -74,7 +59,7 @@ def find_location_photo(*texts):
 
 
 def _cover(photo, width, height):
-    """Scale and centre-crop to fill width x height (like CSS object-fit: cover)."""
+    """Scale and crop to fill width x height (like CSS object-fit: cover)."""
     photo = ImageOps.exif_transpose(photo).convert("RGB")
     scale = max(width / photo.width, height / photo.height)
     photo = photo.resize((round(photo.width * scale), round(photo.height * scale)), Image.LANCZOS)
@@ -83,128 +68,101 @@ def _cover(photo, width, height):
     return photo.crop((left, top, left + width, top + height))
 
 
-def _fade(img, box, start_alpha, end_alpha):
-    """Vertical fade of BLACK over img inside box=(top, bottom)."""
-    top, bottom = box
-    mask = Image.new("L", (1, bottom - top))
-    for y in range(bottom - top):
-        mask.putpixel((0, y), round(start_alpha + (end_alpha - start_alpha) * y / max(1, bottom - top - 1)))
-    mask = mask.resize((W, bottom - top))
-    img.paste(Image.new("RGB", (W, bottom - top), config.BLACK), (0, top), mask)
+def _brand_stripe(img, y, height):
+    stops = [(95, 95, 100), INK, NAVY, config.BLUE, config.PINK]
+    stripe = Image.new("RGB", (W, height))
+    d = ImageDraw.Draw(stripe)
+    for x in range(W):
+        t = x / (W - 1) * (len(stops) - 1)
+        i = min(int(t), len(stops) - 2)
+        f = t - i
+        d.line([(x, 0), (x, height)], fill=tuple(round(stops[i][k] + (stops[i + 1][k] - stops[i][k]) * f)
+                                                 for k in range(3)))
+    img.paste(stripe, (0, y))
 
 
-def _pill(d, x, y, text, colour, size=38):
-    font = _font(FONT_CANDIDATES, size)
-    w = int(d.textlength(text, font=font))
-    d.rounded_rectangle([x, y, x + w + 56, y + 70], radius=35, fill=colour)
-    d.text((x + 28, y + 13), text, font=font, fill=config.WHITE)
+def _skyline_panel(img):
+    """No photo: dark panel with a soft navy glow and the logo's skyline, faded."""
+    panel = Image.new("RGB", (W, SPLIT), INK)
+    glow = Image.radial_gradient("L").resize((W * 2, SPLIT * 2)).crop((W // 2, SPLIT // 2, W * 3 // 2, SPLIT * 3 // 2))
+    panel.paste(Image.new("RGB", (W, SPLIT), NAVY), (0, 0), glow.point(lambda v: (255 - v) * 120 // 255))
+    skyline = Image.open(LOGO).convert("RGBA").crop(SKYLINE_BOX)
+    skyline = skyline.resize((W, round(skyline.height * W / skyline.width)), Image.LANCZOS)
+    alpha = skyline.getchannel("A").point(lambda v: v * 110 // 255)
+    skyline.putalpha(alpha)
+    base = panel.convert("RGBA")
+    base.alpha_composite(skyline, (0, SPLIT - skyline.height))
+    img.paste(base.convert("RGB"), (0, 0))
 
 
-def _stripe(d):
-    third = H // 3
-    for i, colour in enumerate((config.RED, config.BLUE, config.PINK)):
-        d.rectangle([0, i * third, 18, (i + 1) * third], fill=colour)
+def _credit(img, text):
+    d = ImageDraw.Draw(img, "RGBA")
+    font = _oswald(22, b"Medium")
+    w = d.textlength(text, font=font)
+    d.rounded_rectangle([W - M - w - 28, 30, W - M, 68], radius=19, fill=(0, 0, 0, 150))
+    d.text((W - M - w - 14, 35), text, font=font, fill=WHITE)
 
 
-def _footer(d, source_name):
-    small = _font(REGULAR_CANDIDATES, 36)
-    d.rectangle([MARGIN, H - 190, W - MARGIN, H - 187], fill=(60, 60, 70))
-    d.text((MARGIN, H - 160), f"Source: {source_name}", font=small, fill=config.GREY)
-    d.text((MARGIN, H - 110), config.BRAND_HANDLE, font=_font(FONT_CANDIDATES, 40), fill=config.WHITE)
+def _pill(d, x, y, text, fill, size=46):
+    font = _bebas(size)
+    w = d.textlength(text, font=font)
+    d.rounded_rectangle([x, y, x + w + 44, y + size + 14], radius=8, fill=fill)
+    d.text((x + 22, y + 9), text, font=font, fill=WHITE)
+    return x + w + 44
+
+
+def _wrap(d, text, font, width):
+    lines, line = [], ""
+    for word in text.split():
+        trial = f"{line} {word}".strip()
+        if d.textlength(trial, font=font) <= width or not line:
+            line = trial
+        else:
+            lines.append(line)
+            line = word
+    return lines + ([line] if line else [])
+
+
+def _fit_headline(d, text, width, max_height):
+    for size in range(124, 55, -4):
+        font = _bebas(size)
+        lines = _wrap(d, text.upper(), font, width)
+        line_h = round(size * 0.95)
+        if len(lines) * line_h <= max_height:
+            return font, lines, line_h
+    font = _bebas(56)
+    return font, _wrap(d, text.upper(), font, width), 53
 
 
 def render(headline, tag, source_name, location, out_path, photo_path=None, photo_credit=None):
+    img = Image.new("RGB", (W, H), WHITE)
+
     if photo_path and os.path.exists(photo_path):
-        img = _render_photo(headline, tag, source_name, location, photo_path, photo_credit)
+        with Image.open(photo_path) as photo:
+            img.paste(_cover(photo, W, SPLIT), (0, 0))
+        if photo_credit:
+            _credit(img, f"IMAGE: {photo_credit.upper()}")
     else:
-        img = _render_text(headline, tag, source_name, location)
+        _skyline_panel(img)
+
+    _brand_stripe(img, SPLIT, 12)
+    d = ImageDraw.Draw(img)
+
+    # Tag + location pills sit on the seam between photo and panel.
+    x = _pill(d, M, SPLIT - 40, tag, config.TAG_COLOURS.get(tag, config.PINK))
+    if location:
+        _pill(d, x + 14, SPLIT - 40, location.upper(), INK)
+
+    font, lines, line_h = _fit_headline(d, headline, W - 2 * M, 400)
+    y = SPLIT + 70
+    for line in lines:
+        d.text((M, y), line, font=font, fill=INK)
+        y += line_h
+
+    logo = _logo(100)
+    img.paste(logo, (W - M - logo.width, H - 36 - logo.height), logo)
+    d.text((M, H - 100), f"SOURCE: {source_name.upper()}", font=_oswald(26), fill=SOURCE_GREY)
+
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     img.save(out_path, "JPEG", quality=92)
     return out_path
-
-
-FOOTER_TOP = H - 215
-
-
-def _render_photo(headline, tag, source_name, location, photo_path, photo_credit):
-    img = Image.new("RGB", (W, H), config.BLACK)
-
-    # Headline is anchored just above the footer; the photo fills everything above it,
-    # so a short headline gets a bigger photo.
-    font, lines, line_h = _fit_headline(ImageDraw.Draw(img), headline, W - 2 * MARGIN, 440, largest=84)
-    head_top = FOOTER_TOP - len(lines) * line_h - 10
-    pill_y = head_top - 100
-    photo_h = pill_y + 140
-
-    with Image.open(photo_path) as photo:
-        img.paste(_cover(photo, W, photo_h), (0, 0))
-
-    # Dark at the top for the wordmark, melting into black at the bottom so the
-    # photo flows straight into the headline.
-    _fade(img, (0, 240), 170, 0)
-    _fade(img, (photo_h - 330, photo_h), 0, 255)
-
-    if photo_credit:
-        # Translucent dark pill so the credit reads on any photo.
-        credit_font = _font(FONT_CANDIDATES, 24)
-        text = f"Image: {photo_credit}"
-        probe = ImageDraw.Draw(img)
-        w = int(probe.textlength(text, font=credit_font))
-        overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        ImageDraw.Draw(overlay).rounded_rectangle(
-            [W - MARGIN - w - 32, 66, W - MARGIN, 112], radius=23, fill=(0, 0, 0, 150))
-        img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
-        ImageDraw.Draw(img).text((W - MARGIN - w - 16, 75), text, font=credit_font, fill=config.WHITE)
-
-    d = ImageDraw.Draw(img)
-    _stripe(d)
-
-    mark = _font(FONT_CANDIDATES, 46)
-    d.text((MARGIN, 60), config.BRAND_NAME, font=mark, fill=config.PINK, stroke_width=3, stroke_fill=config.BLACK)
-    d.rectangle([MARGIN, 122, MARGIN + 120, 128], fill=config.RED)
-
-    # Tag pill sits where the photo fades out - the eye lands here first.
-    _pill(d, MARGIN, pill_y, tag, config.TAG_COLOURS.get(tag, config.PINK))
-    if location:
-        loc_font = _font(FONT_CANDIDATES, 30)
-        tag_w = d.textlength(tag, font=_font(FONT_CANDIDATES, 38))
-        d.text((MARGIN + tag_w + 86, pill_y + 19), f"• {location.upper()}", font=loc_font, fill=config.WHITE,
-               stroke_width=2, stroke_fill=config.BLACK)
-
-    y = head_top
-    for line in lines:
-        d.text((MARGIN, y), line, font=font, fill=config.WHITE)
-        y += line_h
-
-    _footer(d, source_name)
-    return img
-
-
-def _render_text(headline, tag, source_name, location):
-    img = Image.new("RGB", (W, H), config.BLACK)
-    d = ImageDraw.Draw(img)
-    _stripe(d)
-
-    # Wordmark.
-    mark = _font(FONT_CANDIDATES, 46)
-    d.text((MARGIN, 70), config.BRAND_NAME, font=mark, fill=config.PINK)
-    d.rectangle([MARGIN, 132, MARGIN + 120, 138], fill=config.RED)
-
-    top = 230
-    _pill(d, MARGIN, top, tag, config.TAG_COLOURS.get(tag, config.PINK))
-
-    # Headline.
-    head_top = top + 120
-    font, lines, line_h = _fit_headline(d, headline, W - 2 * MARGIN, 700)
-    y = head_top
-    for line in lines:
-        d.text((MARGIN, y), line, font=font, fill=config.WHITE)
-        y += line_h
-
-    # Location under the headline.
-    small = _font(REGULAR_CANDIDATES, 36)
-    if location:
-        d.text((MARGIN, y + 30), f"• {location.upper()}", font=small, fill=config.PINK)
-
-    _footer(d, source_name)
-    return img

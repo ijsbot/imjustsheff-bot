@@ -27,11 +27,6 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      - name: Make sure the card font is installed
-        run: |
-          [ -f /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf ] || \
-            (sudo apt-get update -q && sudo apt-get install -y -q fonts-dejavu-core)
-
       - name: Set git identity (the bot pushes card images while posting)
         run: |
           git config user.name "imjustsheff-bot"
