@@ -372,17 +372,18 @@ class Bot:
     def check_dms(self):
         if not (config.IG_PAGE_ID and config.IG_ACCESS_TOKEN):
             return
+        started = now()
+        if not self.s.get("dm_since"):
+            # First run: only messages that arrive from now on count as tips.
+            self.s["dm_since"] = started.isoformat()
+            self.log("Instagram DMs: first run - only new messages from now on will become drafts")
+            return
         try:
-            if "ig_dms" not in self.s["seeded"]:
-                for mid in instagram_dms.all_message_ids():
-                    self.s["seen"][mid] = now().isoformat()
-                self.s["seeded"].append("ig_dms")
-                self.log("Instagram DMs: first run - existing messages marked as seen")
-                return
-            tips = instagram_dms.new_tips(self.s["seen"])
+            tips = instagram_dms.new_tips(self.s["seen"], datetime.fromisoformat(self.s["dm_since"]))
         except Exception as exc:
             self.log(f"Instagram DMs: FAILED ({exc})")
             return
+        self.s["dm_since"] = started.isoformat()
         self.log(f"Instagram DMs: {len(tips)} new tip(s)")
         for tip in tips:
             for mid in tip["msg_ids"]:
