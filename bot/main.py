@@ -22,7 +22,7 @@ HELP = (
     "Editing: tap ✏️ (or reply to a draft) and send the new caption. "
     "Start your message with 'headline:' to change the text on the image instead.\n\n"
     "Photos: reply to a draft with a photo (e.g. a police appeal or CCTV image) and the card is rebuilt "
-    "around it. Add a caption to set the image credit. Reply 'no photo' to go back to a text-only card.\n\n"
+    "around it. Add a caption to set the image credit. Drafts use the article's own photo automatically (credited on the card). Reply 'no photo' for a text-only card.\n\n"
     "Sensitive stories (deaths, sexual offences, children) get a muted card without pink. Reply "
     "'sensitive' or 'not sensitive' to a draft to switch it.\n\n"
     "Manual story: send a message (or a photo with a caption) with the headline on the first line, "
@@ -93,7 +93,7 @@ class Bot:
 
     def story_for_message(self, message_id):
         for st in self.stories.values():
-            if message_id in st.get("msg_ids", []):
+            if message_id in st.get("msg_ids", []) or message_id in st.get("extra_ids", []):
                 return st
         return None
 
@@ -147,6 +147,7 @@ class Bot:
                 self.store_photo(story, lambda p: telegram.download_url(photo_url, p), credit, photo_from=0)
             except Exception as exc:
                 self.log(f"    photo download failed: {exc}")
+                story["photo_failed"] = True
             self.render_card(story)
         else:
             self.render_card(story)
@@ -174,6 +175,8 @@ class Bot:
         others = {i["source_name"] for i in story["items"][1:]}
         if others:
             lines.append("➕ Also reported by: " + ", ".join(sorted(others)))
+        if story.get("photo_failed") and not story.get("photo"):
+            lines.append("📷 The site blocked its photo - reply to this draft with one to add it")
         if story["items"][0]["link"]:
             lines.append(story["items"][0]["link"])
         header = "\n".join(lines) + "\n\n"
@@ -247,7 +250,10 @@ class Bot:
                 self.store_photo(story, lambda p: telegram.download_url(item["image"], p),
                                  item["source_name"], photo_from=int(extra))
             except Exception as exc:
-                telegram.send_text(f"⚠️ Couldn't download that photo: {exc}", reply_to=story["msg_ids"][0])
+                note = telegram.send_text("⚠️ That site blocked its photo. Save it from the article and "
+                                          "reply to this message (or the draft) with it.",
+                                          reply_to=story["msg_ids"][0])
+                story.setdefault("extra_ids", []).append(note["message_id"])
                 return
             story["status"] = "pending"
             self.render_card(story)
@@ -270,15 +276,19 @@ class Bot:
 
         reply = msg.get("reply_to_message", {}).get("message_id")
         story = self.story_for_message(reply) if reply else None
-        if not story and self.s["awaiting_edit"]:
+        if not story and self.s["awaiting_edit"] and not msg.get("photo"):
             story = self.stories.get(self.s["awaiting_edit"])
         self.s["awaiting_edit"] = None
 
         if msg.get("photo"):
             if story and story["status"] in ("pending", "failed"):
                 self.attach_photo(story, msg, credit=text or story["source_name"])
+                story.pop("photo_failed", None)
                 story["status"] = "pending"
                 self.send_draft(story)
+            elif reply:
+                telegram.send_text("⚠️ I couldn't match that photo to a draft (it may have been posted, "
+                                   "skipped or expired). Reply to the draft's card image with it.")
             elif text:
                 self.manual_story(text, photo_msg=msg)
             else:
@@ -442,8 +452,9 @@ class Bot:
                     index = len(match["items"]) - 1
                     buttons = {"inline_keyboard": [[{"text": f"📷 Use {item['source_name']} photo",
                                                      "callback_data": f"photo:{match['id']}:{index}"}]]}
-                telegram.send_text(f"➕ Also reported by {item['source_name']}: {item['title']}\n{item['link']}",
-                                   reply_to=match["msg_ids"][0], buttons=buttons)
+                note = telegram.send_text(f"➕ Also reported by {item['source_name']}: {item['title']}\n{item['link']}",
+                                          reply_to=match["msg_ids"][0], buttons=buttons)
+                match.setdefault("extra_ids", []).append(note["message_id"])
             return
 
         if not draft["newsworthy"] and not item["official"]:
@@ -451,7 +462,8 @@ class Bot:
             return
 
         update_of = match["id"] if draft["relation"] == "update" and match else None
-        self.create_story(item, draft, update_of)
+        # Every draft uses its own article's photo (credited on the card) when the feed has one.
+        self.create_story(item, draft, update_of, photo_url=item.get("image"))
 
     # --- housekeeping --------------------------------------------------------
     def cleanup(self):

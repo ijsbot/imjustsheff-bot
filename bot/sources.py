@@ -80,7 +80,9 @@ def _fetch_inoreader_html(source):
         link = a.get("href", "")
         content = a.find_next("div", class_="article_content")
         summary = content.get_text(" ") if content else ""
-        items.append(_item(source, link, a.get_text(" "), summary, link))
+        img = content.find("img") if content else None  # police appeals often include the photo
+        image = img.get("src", "") if img and img.get("src", "").startswith("http") else ""
+        items.append(_item(source, link, a.get_text(" "), summary, link, image=image))
     return items
 
 
