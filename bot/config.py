@@ -142,6 +142,7 @@ SKIP_WORDS = [
 # --- Behaviour ---------------------------------------------------------------
 DEDUPE_WINDOW_HOURS = 72          # compare new items against stories from this long ago
 MAX_NEW_ITEMS_PER_RUN = 15        # the rest wait for the next run
+MAX_POSTS_PER_RUN = 5             # approved posts beyond this go out on the next run
 CARD_RETENTION_DAYS = 14          # stories (and their private photos) older than this are forgotten
 PUBLIC_CARD_DAYS = 2              # posted card images are removed from the repo after this
 SEEN_RETENTION_DAYS = 60

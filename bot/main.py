@@ -329,9 +329,12 @@ class Bot:
 
     # --- publishing ----------------------------------------------------------
     def publish_approved(self):
+        posted = 0
         for story in self.stories.values():
             if story["status"] != "approved":
                 continue
+            if posted >= config.MAX_POSTS_PER_RUN:
+                break  # keeps each run well inside GitHub's time limit; the rest go next run
             if not (config.IG_USER_ID and config.IG_ACCESS_TOKEN and config.IMAGE_BASE_URL):
                 story["status"] = "failed"
                 telegram.send_text("⚠️ Instagram isn't set up yet (IG_USER_ID / IG_ACCESS_TOKEN missing).",
@@ -345,6 +348,10 @@ class Bot:
                 wait_until_online(image_url)
                 link = instagram.publish(image_url, story["caption"])
                 story.update(status="posted", posted=now().isoformat(), permalink=link)
+                posted += 1
+                # Remember it straight away, so a run cut short can never post this one twice.
+                if not self.dry_run:
+                    vault.save_state(self.s)
                 telegram.clear_buttons(story["msg_ids"][0])
                 telegram.send_text(f"✅ Posted: {link}", reply_to=story["msg_ids"][0])
                 self.log(f"Posted {story['id']}: {link}")
