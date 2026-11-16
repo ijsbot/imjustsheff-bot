@@ -191,7 +191,13 @@ class Bot:
     def handle_updates(self):
         if not self.telegram_on:
             return
-        updates = telegram.get_updates(self.s["tg_offset"])
+        try:
+            updates = telegram.get_updates(self.s["tg_offset"])
+        except Exception as exc:
+            # Keep checking feeds/DMs even if Telegram is misconfigured; drafts just won't send.
+            self.log(f"TELEGRAM ERROR: {exc} - check the TELEGRAM_BOT_TOKEN secret")
+            self.telegram_on = False
+            return
         for upd in updates:
             self.s["tg_offset"] = upd["update_id"] + 1
             try:

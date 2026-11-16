@@ -145,16 +145,22 @@ PUBLIC_CARD_DAYS = 2              # posted card images are removed from the repo
 SEEN_RETENTION_DAYS = 60
 
 # --- Secrets / environment -------------------------------------------------------
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+def _secret(name):
+    """Secrets pasted into GitHub often pick up stray spaces, quotes or line breaks."""
+    return os.environ.get(name, "").strip().strip('"').strip("'").strip()
 
-IG_USER_ID = os.environ.get("IG_USER_ID", "")
-IG_ACCESS_TOKEN = os.environ.get("IG_ACCESS_TOKEN", "")
+
+# A Telegram token never starts with "bot" - that's from the getUpdates URL.
+TELEGRAM_BOT_TOKEN = _secret("TELEGRAM_BOT_TOKEN").removeprefix("bot")
+TELEGRAM_CHAT_ID = _secret("TELEGRAM_CHAT_ID")
+
+IG_USER_ID = _secret("IG_USER_ID")
+IG_ACCESS_TOKEN = _secret("IG_ACCESS_TOKEN")
 # Facebook Page linked to the Instagram account - needed to read Instagram DMs (tips from followers).
-IG_PAGE_ID = os.environ.get("IG_PAGE_ID", "")
+IG_PAGE_ID = _secret("IG_PAGE_ID")
 GRAPH_API_VERSION = os.environ.get("GRAPH_API_VERSION") or "v23.0"
 
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+ANTHROPIC_API_KEY = _secret("ANTHROPIC_API_KEY")
 # claude-haiku-5-5: under £1/month for every draft. Set CLAUDE_MODEL=claude-opus-5-5 for richer
 # captions (~£10-30/month at 30-60 drafts a day).
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL") or "claude-haiku-5-5"
@@ -168,7 +174,7 @@ IMAGE_BASE_URL = os.environ.get("IMAGE_BASE_URL") or (
 )
 
 # Encrypts the bot's memory and private photos in the public repo (see bot/vault.py).
-STATE_KEY = os.environ.get("STATE_KEY", "")
+STATE_KEY = _secret("STATE_KEY")
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATE_PATH = os.path.join(ROOT, "state.enc")
