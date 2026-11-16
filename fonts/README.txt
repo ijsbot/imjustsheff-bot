@@ -1,3 +1,2 @@
-Card fonts (both free under the SIL Open Font License - see the OFL-*.txt files):
-- BebasNeue-Regular.ttf: headlines, tags
-- Oswald.ttf: small text (source line, image credit)
+Card font: Montserrat-Italic.ttf (variable; the cards use Black, ExtraBold and Bold Italic).
+Free under the SIL Open Font License - see OFL-Montserrat.txt.

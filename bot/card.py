@@ -1,43 +1,37 @@
-"""Render the branded 1080x1350 card ("design C").
+"""Render the branded 1080x1350 card - "broadcast" design matching the IMJUSTSHEFF NEWS logo.
 
-Top: the photo (or, with no photo, a dark panel with the Sheffield skyline from the logo).
-A brand stripe (grey -> black -> navy -> blue -> pink, like the logo lettering) splits it from
-a white panel holding the tag, a Bebas Neue headline, the source and the logo.
+Full-bleed photo graded towards navy (or, with no photo, a night-sky panel built from the
+logo's own skyline), the logo across the top, a slanted pink "> TAG" ribbon like the logo's
+"> NEWS" tab, a heavy italic headline with key words in hot pink, a neon pink rule, and a
+slanted white footer strip like the logo's "SHEFFIELD NEWS / EVENTS / COMMUNITY" banner.
 """
 import os
+import re
 
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 from . import config
 
 W, H = 1080, 1350
-M = 70
-SPLIT = 700  # where the photo ends and the white panel starts
+M = 64
+SLANT = 0.21  # parallelogram lean, matching the logo's italic
 
-INK = (10, 10, 18)
+INK = (6, 10, 28)
+NAVY = (14, 26, 70)
 WHITE = (255, 255, 255)
-NAVY = (18, 38, 105)
-SOURCE_GREY = (110, 110, 120)
 
-BEBAS = os.path.join(config.FONTS_DIR, "BebasNeue-Regular.ttf")
-OSWALD = os.path.join(config.FONTS_DIR, "Oswald.ttf")
-LOGO = os.path.join(config.ASSETS_DIR, "logo-transparent.png")
-SKYLINE_BOX = (575, 0, 1155, 172)  # the skyline part of logo-transparent.png
+FONT = os.path.join(config.FONTS_DIR, "Montserrat-Italic.ttf")
+LOGO = os.path.join(config.ASSETS_DIR, "logo-news.png")
+SKYLINE_BOX = (170, 0, 1620, 365)  # the skyline + pink arc part of logo-news.png
 
-
-def _bebas(size):
-    return ImageFont.truetype(BEBAS, size)
+FOOTER_TOP = H - 132
+FOOTER_H = 70
 
 
-def _oswald(size, weight=b"Regular"):
-    font = ImageFont.truetype(OSWALD, size)
+def _font(size, weight=b"Black Italic"):
+    font = ImageFont.truetype(FONT, size)
     font.set_variation_by_name(weight)
     return font
-
-
-def _logo(height):
-    im = Image.open(LOGO).convert("RGBA")
-    return im.resize((round(im.width * height / im.height), height), Image.LANCZOS)
 
 
 def find_location_photo(*texts):
@@ -58,6 +52,8 @@ def find_location_photo(*texts):
     return None
 
 
+# --- backgrounds -----------------------------------------------------------------------
+
 def _cover(photo, width, height):
     """Scale and crop to fill width x height (like CSS object-fit: cover)."""
     photo = ImageOps.exif_transpose(photo).convert("RGB")
@@ -68,101 +64,181 @@ def _cover(photo, width, height):
     return photo.crop((left, top, left + width, top + height))
 
 
-def _brand_stripe(img, y, height):
-    stops = [(95, 95, 100), INK, NAVY, config.BLUE, config.PINK]
-    stripe = Image.new("RGB", (W, height))
-    d = ImageDraw.Draw(stripe)
-    for x in range(W):
-        t = x / (W - 1) * (len(stops) - 1)
-        i = min(int(t), len(stops) - 2)
-        f = t - i
-        d.line([(x, 0), (x, height)], fill=tuple(round(stops[i][k] + (stops[i + 1][k] - stops[i][k]) * f)
-                                                 for k in range(3)))
-    img.paste(stripe, (0, y))
+def _vertical_fade(img, top, bottom, a0, a1, colour=INK):
+    mask = Image.linear_gradient("L").resize((W, bottom - top)).point(lambda v: round(a0 + (a1 - a0) * v / 255))
+    img.paste(Image.new("RGB", (W, bottom - top), colour), (0, top), mask)
 
 
-def _skyline_panel(img):
-    """No photo: dark panel with a soft navy glow and the logo's skyline, faded."""
-    panel = Image.new("RGB", (W, SPLIT), INK)
-    glow = Image.radial_gradient("L").resize((W * 2, SPLIT * 2)).crop((W // 2, SPLIT // 2, W * 3 // 2, SPLIT * 3 // 2))
-    panel.paste(Image.new("RGB", (W, SPLIT), NAVY), (0, 0), glow.point(lambda v: (255 - v) * 120 // 255))
+def _photo_background(path):
+    with Image.open(path) as photo:
+        img = _cover(photo, W, H)
+    # Grade towards the logo's night-time navy so every photo feels on-brand.
+    img = Image.blend(img, Image.new("RGB", (W, H), NAVY), 0.18)
+    return img
+
+
+def _night_background():
+    """No photo: navy night sky, the logo's skyline enlarged and softened, pink glow."""
+    sky = Image.linear_gradient("L").resize((W, H))
+    img = Image.composite(Image.new("RGB", (W, H), INK), Image.new("RGB", (W, H), (16, 30, 82)), sky)
+
+    glow = Image.radial_gradient("L").resize((W * 2, H)).crop((W // 2, 0, W * 3 // 2, H))
+    img.paste(Image.new("RGB", (W, H), (120, 20, 110)), (0, 0), glow.point(lambda v: max(0, 200 - v) * 60 // 200))
+
     skyline = Image.open(LOGO).convert("RGBA").crop(SKYLINE_BOX)
-    skyline = skyline.resize((W, round(skyline.height * W / skyline.width)), Image.LANCZOS)
-    alpha = skyline.getchannel("A").point(lambda v: v * 110 // 255)
-    skyline.putalpha(alpha)
-    base = panel.convert("RGBA")
-    base.alpha_composite(skyline, (0, SPLIT - skyline.height))
-    img.paste(base.convert("RGB"), (0, 0))
+    width = int(W * 1.25)
+    skyline = skyline.resize((width, round(skyline.height * width / skyline.width)), Image.LANCZOS)
+    skyline = skyline.filter(ImageFilter.GaussianBlur(1.2))
+    # Fade the skyline out towards its base so it melts into the night instead of ending in a line.
+    fade = Image.linear_gradient("L").resize(skyline.size).point(lambda v: 255 if v < 110 else max(0, 255 - (v - 110) * 2))
+    alpha = Image.composite(skyline.getchannel("A"), Image.new("L", skyline.size, 0), fade)
+    skyline.putalpha(alpha.point(lambda v: v * 170 // 255))
+    base = img.convert("RGBA")
+    base.alpha_composite(skyline, ((W - width) // 2, 330))
+    return base.convert("RGB")
 
 
-def _credit(img, text):
-    d = ImageDraw.Draw(img, "RGBA")
-    font = _oswald(22, b"Medium")
-    w = d.textlength(text, font=font)
-    d.rounded_rectangle([W - M - w - 28, 30, W - M, 68], radius=19, fill=(0, 0, 0, 150))
-    d.text((W - M - w - 14, 35), text, font=font, fill=WHITE)
+# --- pieces ----------------------------------------------------------------------------
+
+def _parallelogram(d, x, y, w, h, fill, outline=None, width=0):
+    lean = round(h * SLANT)
+    d.polygon([(x + lean, y), (x + w + lean, y), (x + w, y + h), (x, y + h)], fill=fill,
+              outline=outline, width=width)
 
 
-def _pill(d, x, y, text, fill, size=46):
-    font = _bebas(size)
-    w = d.textlength(text, font=font)
-    d.rounded_rectangle([x, y, x + w + 44, y + size + 14], radius=8, fill=fill)
-    d.text((x + 22, y + 9), text, font=font, fill=WHITE)
-    return x + w + 44
+def _shadowed_text(img, xy, text, font, fill, shadow=(0, 0, 0, 170), offset=(4, 6), blur=6):
+    layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(layer).text((xy[0] + offset[0], xy[1] + offset[1]), text, font=font, fill=shadow)
+    layer = layer.filter(ImageFilter.GaussianBlur(blur))
+    ImageDraw.Draw(layer).text(xy, text, font=font, fill=fill)
+    img.alpha_composite(layer)
 
 
-def _wrap(d, text, font, width):
-    lines, line = [], ""
-    for word in text.split():
-        trial = f"{line} {word}".strip()
-        if d.textlength(trial, font=font) <= width or not line:
+def _neon_rule(img, x, y, length):
+    layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+    _parallelogram(d, x, y, length, 8, config.PINK + (255,))
+    glow = layer.filter(ImageFilter.GaussianBlur(10))
+    img.alpha_composite(glow)
+    img.alpha_composite(layer)
+
+
+def _tag_ribbon(img, x, y, tag, location):
+    d = ImageDraw.Draw(img)
+    font = _font(40)
+    h = 64
+    text_w = d.textlength(tag, font=font)
+    w = int(text_w + 96)
+    _parallelogram(d, x, y, w, h, config.TAG_COLOURS.get(tag, config.PINK))
+    # Play-button triangle, like the logo's "> NEWS".
+    tx, ty = x + 30, y + 18
+    d.polygon([(tx, ty), (tx + 24, ty + 14), (tx, ty + 28)], fill=WHITE)
+    d.text((x + 66, y + 9), tag, font=font, fill=WHITE)
+    if location:
+        loc_font = _font(34, b"ExtraBold Italic")
+        lw = int(d.textlength(location.upper(), font=loc_font) + 52)
+        _parallelogram(d, x + w + 10, y, lw, h, WHITE)
+        d.text((x + w + 36, y + 13), location.upper(), font=loc_font, fill=INK)
+
+
+def _footer(img, source_name, photo_credit):
+    d = ImageDraw.Draw(img)
+    # Slanted white strip with a pink edge, like the logo's tagline banner.
+    _parallelogram(d, M - 20, FOOTER_TOP - 6, W - 2 * M + 24, FOOTER_H + 12, config.PINK)
+    _parallelogram(d, M - 14, FOOTER_TOP, W - 2 * M + 12, FOOTER_H, WHITE)
+    small = _font(24, b"ExtraBold Italic")
+    text = f"SOURCE: {source_name.upper()}"
+    if photo_credit and photo_credit.strip().lower() != source_name.strip().lower():
+        text += f"  /  IMAGE: {photo_credit.upper()}"
+    handle_font = _font(30)
+    handle = config.BRAND_HANDLE.upper()
+    handle_w = d.textlength(handle, font=handle_font)
+    while d.textlength(text, font=small) > W - 2 * M - handle_w - 70 and len(text) > 10:
+        text = text[:-2].rstrip() + "…"
+    d.text((M + 18, FOOTER_TOP + 21), text, font=small, fill=INK)
+    d.text((W - M - handle_w - 10, FOOTER_TOP + 16), handle, font=handle_font, fill=config.PINK)
+
+
+# --- headline --------------------------------------------------------------------------
+
+def _wrap(d, words, font, width):
+    lines, line = [], []
+    for word in words:
+        trial = line + [word]
+        if d.textlength(" ".join(trial), font=font) <= width or not line:
             line = trial
         else:
             lines.append(line)
-            line = word
+            line = [word]
     return lines + ([line] if line else [])
 
 
-def _fit_headline(d, text, width, max_height):
-    for size in range(124, 55, -4):
-        font = _bebas(size)
-        lines = _wrap(d, text.upper(), font, width)
-        line_h = round(size * 0.95)
+def _fit(d, words, width, max_height):
+    for size in range(100, 51, -4):
+        font = _font(size)
+        lines = _wrap(d, words, font, width)
+        line_h = round(size * 1.08)
         if len(lines) * line_h <= max_height:
             return font, lines, line_h
-    font = _bebas(56)
-    return font, _wrap(d, text.upper(), font, width), 53
+    font = _font(52)
+    return font, _wrap(d, words, font, width), 56
 
 
-def render(headline, tag, source_name, location, out_path, photo_path=None, photo_credit=None):
-    img = Image.new("RGB", (W, H), WHITE)
+def _key(word):
+    return re.sub(r"[^A-Z0-9]", "", word.upper())
 
-    if photo_path and os.path.exists(photo_path):
-        with Image.open(photo_path) as photo:
-            img.paste(_cover(photo, W, SPLIT), (0, 0))
-        if photo_credit:
-            _credit(img, f"IMAGE: {photo_credit.upper()}")
-    else:
-        _skyline_panel(img)
 
-    _brand_stripe(img, SPLIT, 12)
+def _highlight_set(headline, highlight, location):
+    """Words to colour pink: the AI's pick, else the place name if it's in the headline."""
+    for phrase in (highlight, location):
+        keys = {_key(w) for w in (phrase or "").split()} - {""}
+        if keys and keys & {_key(w) for w in headline.split()}:
+            return keys
+    return set()
+
+
+def _draw_headline(img, lines, font, line_h, top, pink_keys):
     d = ImageDraw.Draw(img)
-
-    # Tag + location pills sit on the seam between photo and panel.
-    x = _pill(d, M, SPLIT - 40, tag, config.TAG_COLOURS.get(tag, config.PINK))
-    if location:
-        _pill(d, x + 14, SPLIT - 40, location.upper(), INK)
-
-    font, lines, line_h = _fit_headline(d, headline, W - 2 * M, 400)
-    y = SPLIT + 70
+    space = d.textlength(" ", font=font)
+    y = top
     for line in lines:
-        d.text((M, y), line, font=font, fill=INK)
+        x = M
+        for word in line:
+            colour = config.PINK if _key(word) in pink_keys else WHITE
+            _shadowed_text(img, (x, y), word, font, colour)
+            x += d.textlength(word, font=font) + space
         y += line_h
+    return y
 
-    logo = _logo(100)
-    img.paste(logo, (W - M - logo.width, H - 36 - logo.height), logo)
-    d.text((M, H - 100), f"SOURCE: {source_name.upper()}", font=_oswald(26), fill=SOURCE_GREY)
+
+# --- render ----------------------------------------------------------------------------
+
+def render(headline, tag, source_name, location, out_path, photo_path=None, photo_credit=None,
+           highlight=None):
+    has_photo = bool(photo_path and os.path.exists(photo_path))
+    img = (_photo_background(photo_path) if has_photo else _night_background())
+
+    # Darken the top for the logo and the bottom half for the headline.
+    _vertical_fade(img, 0, 380, 215, 0)
+    _vertical_fade(img, 520, H, 0, 248)
+    img = img.convert("RGBA")
+
+    logo = Image.open(LOGO).convert("RGBA")
+    logo_w = 760
+    logo = logo.resize((logo_w, round(logo.height * logo_w / logo.width)), Image.LANCZOS)
+    img.alpha_composite(logo, ((W - logo_w) // 2, 22))
+
+    d = ImageDraw.Draw(img)
+    words = headline.upper().split()
+    font, lines, line_h = _fit(d, words, W - 2 * M - 10, 400)
+    text_h = len(lines) * line_h
+    head_top = FOOTER_TOP - 74 - text_h
+
+    _tag_ribbon(img, M, head_top - 96, tag, location)
+    bottom = _draw_headline(img, lines, font, line_h, head_top, _highlight_set(headline, highlight, location))
+    _neon_rule(img, M, bottom + 18, 300)
+    _footer(img, source_name, photo_credit if has_photo else None)
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    img.save(out_path, "JPEG", quality=92)
+    img.convert("RGB").save(out_path, "JPEG", quality=93)
     return out_path

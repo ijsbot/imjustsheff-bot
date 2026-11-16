@@ -100,7 +100,7 @@ class Bot:
         elif story.get("use_area_photo", True):
             photo = card.find_location_photo(story["location"], story["headline"])
         card.render(story["headline"], story["tag"], story["source_name"], story["location"],
-                    out_path, photo, credit)
+                    out_path, photo, credit, highlight=story.get("highlight"))
         story["card"] = out_path
         return out_path
 
@@ -121,6 +121,7 @@ class Bot:
             "tag": "UPDATE" if update_of else draft["tag"],
             "caption": draft["caption"],
             "location": draft["location"],
+            "highlight": draft.get("highlight", ""),
             "source_id": item["source_id"],
             "source_name": item["source_name"],
             "media": item["media"],
