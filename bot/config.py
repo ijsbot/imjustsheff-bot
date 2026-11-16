@@ -4,6 +4,7 @@ Secrets come from environment variables (GitHub Actions secrets).
 Everything else - sources, filters, branding - lives here so it is easy to tweak.
 """
 import os
+import re
 
 # --- Branding --------------------------------------------------------------
 BRAND_NAME = "IMJUSTSHEFF"
@@ -150,8 +151,14 @@ def _secret(name):
     return os.environ.get(name, "").strip().strip('"').strip("'").strip()
 
 
-# A Telegram token never starts with "bot" - that's from the getUpdates URL.
-TELEGRAM_BOT_TOKEN = _secret("TELEGRAM_BOT_TOKEN").removeprefix("bot")
+def _telegram_token():
+    """Pull the token (digits:letters) out of whatever was pasted, e.g. 'TELEGRAM_BOT_TOKEN = bot123:ABC...'."""
+    raw = _secret("TELEGRAM_BOT_TOKEN")
+    match = re.search(r"\d{6,}:[A-Za-z0-9_-]{30,}", raw)
+    return match.group(0) if match else raw
+
+
+TELEGRAM_BOT_TOKEN = _telegram_token()
 TELEGRAM_CHAT_ID = _secret("TELEGRAM_CHAT_ID")
 
 IG_USER_ID = _secret("IG_USER_ID")
