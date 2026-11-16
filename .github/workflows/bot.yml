@@ -50,4 +50,11 @@ jobs:
         if: always()
         run: |
           for p in state.enc private cards; do [ -e "$p" ] && git add -A "$p"; done
-          git diff --cached --quiet || (git commit -q -m "bot: update state" && git push -q)
+          git diff --cached --quiet && exit 0
+          git commit -q -m "bot: update state"
+          # If the repo changed during the run (e.g. a code update was pushed), catch up and retry.
+          for i in 1 2 3; do
+            git push -q && exit 0
+            git pull -q --rebase -X theirs
+          done
+          exit 1

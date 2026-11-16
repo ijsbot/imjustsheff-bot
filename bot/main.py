@@ -46,7 +46,13 @@ def make_public(path):
     rel = os.path.relpath(path, config.ROOT).replace(os.sep, "/")
     subprocess.run(["git", "add", rel], cwd=config.ROOT, check=True)
     subprocess.run(["git", "commit", "-q", "-m", f"bot: card {os.path.basename(rel)}"], cwd=config.ROOT, check=True)
-    subprocess.run(["git", "push", "-q"], cwd=config.ROOT, check=True)
+    # GitHub refuses the push if the repo changed since this run started (e.g. you pushed an
+    # update mid-run). Catch up with the latest version and try again.
+    for attempt in range(3):
+        if subprocess.run(["git", "push", "-q"], cwd=config.ROOT).returncode == 0:
+            return
+        subprocess.run(["git", "pull", "-q", "--rebase", "--autostash"], cwd=config.ROOT)
+    raise RuntimeError("couldn't upload the card image to GitHub - tap Try again in a few minutes")
 
 
 def wait_until_online(url, seconds=90):
