@@ -218,15 +218,17 @@ def render(headline, tag, source_name, location, out_path, photo_path=None, phot
     has_photo = bool(photo_path and os.path.exists(photo_path))
     img = (_photo_background(photo_path) if has_photo else _night_background())
 
-    # Darken the top for the logo and the bottom half for the headline.
-    _vertical_fade(img, 0, 380, 215, 0)
-    _vertical_fade(img, 520, H, 0, 248)
+    # A light shade behind the corner logo, and a heavy one behind the headline.
+    _vertical_fade(img, 0, 230, 150 if has_photo else 0, 0)
+    _vertical_fade(img, 560, H, 0, 248)
     img = img.convert("RGBA")
 
+    # Small logo tucked in the top-left corner so faces (e.g. police mugshots) stay visible.
+    # Photo-less cards have nothing to cover, so the logo can be bigger there.
     logo = Image.open(LOGO).convert("RGBA")
-    logo_w = 760
+    logo_w = 400 if has_photo else 640
     logo = logo.resize((logo_w, round(logo.height * logo_w / logo.width)), Image.LANCZOS)
-    img.alpha_composite(logo, ((W - logo_w) // 2, 22))
+    img.alpha_composite(logo, (24, 18) if has_photo else ((W - logo_w) // 2, 28))
 
     d = ImageDraw.Draw(img)
     words = headline.upper().split()
