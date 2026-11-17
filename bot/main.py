@@ -30,6 +30,17 @@ HELP = (
 )
 
 
+PHOTO_TRIES = 12  # one try per run - a few hours of retries
+
+
+def _short_error(exc):
+    """'403 Client Error: Forbidden for url: ...' -> 'site said 403 Forbidden'."""
+    resp = getattr(exc, "response", None)
+    if resp is not None:
+        return f"site said {resp.status_code} {resp.reason}"
+    return type(exc).__name__
+
+
 def now():
     return datetime.now(timezone.utc)
 
@@ -147,7 +158,8 @@ class Bot:
                 self.store_photo(story, lambda p: telegram.download_url(photo_url, p), credit, photo_from=0)
             except Exception as exc:
                 self.log(f"    photo download failed: {exc}")
-                story["photo_failed"] = True
+                story["photo_failed"] = _short_error(exc)
+                story["photo_tries"] = 1
             self.render_card(story)
         else:
             self.render_card(story)
@@ -176,7 +188,10 @@ class Bot:
         if others:
             lines.append("➕ Also reported by: " + ", ".join(sorted(others)))
         if story.get("photo_failed") and not story.get("photo"):
-            lines.append("📷 The site blocked its photo - reply to this draft with one to add it")
+            tries = story.get("photo_tries", 1)
+            retry = " - I'll keep trying for a few hours" if tries < PHOTO_TRIES else ""
+            lines.append(f"📷 Couldn't get the article photo yet ({story['photo_failed']}){retry}. "
+                         "Or reply to this draft with one.")
         if story["items"][0]["link"]:
             lines.append(story["items"][0]["link"])
         header = "\n".join(lines) + "\n\n"
@@ -503,10 +518,36 @@ class Bot:
         seen_cutoff = (now() - timedelta(days=config.SEEN_RETENTION_DAYS)).isoformat()
         self.s["seen"] = {k: v for k, v in self.s["seen"].items() if v >= seen_cutoff}
 
+    def retry_photos(self):
+        """News sites sometimes refuse GitHub's servers for a while - try waiting drafts again."""
+        for story in list(self.stories.values()):
+            if (story["status"] != "pending" or story.get("photo")
+                    or not story.get("use_area_photo", True) or story.get("photo_tries", 0) >= PHOTO_TRIES):
+                continue
+            index, item = next(((i, it) for i, it in enumerate(story["items"]) if it.get("image")), (None, None))
+            if item is None:
+                continue
+            story["photo_tries"] = story.get("photo_tries", 0) + 1
+            try:
+                self.store_photo(story, lambda p: telegram.download_url(item["image"], p),
+                                 item["source_name"], photo_from=index)
+            except Exception as exc:
+                story["photo_failed"] = _short_error(exc)
+                self.log(f"  photo retry {story['photo_tries']} for {story['id']} failed: {exc}")
+                continue
+            story.pop("photo_failed", None)
+            self.log(f"  photo retry worked for {story['id']}")
+            self.render_card(story)
+            if self.telegram_on:
+                self.send_draft(story)
+                telegram.send_text(f"📷 Got the photo from {item['source_name']} on a retry - updated card above.",
+                                   reply_to=story["msg_ids"][0])
+
     def run(self):
         self.handle_updates()
         self.publish_approved()
         self.check_dms()
+        self.retry_photos()
         self.check_sources()
         self.cleanup()
 
