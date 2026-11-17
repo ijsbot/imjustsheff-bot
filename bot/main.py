@@ -446,6 +446,22 @@ class Bot:
         if draft["relation"] == "same_story" and match:
             match["items"].append(item)
             self.log(f"    same story as {match['id']} ({match['status']})")
+            # A police/council draft with no photo borrows the first outlet photo that turns up.
+            if (match["status"] == "pending" and not match.get("photo") and item.get("image")
+                    and match.get("use_area_photo", True)):  # not after you said "no photo"
+                try:
+                    self.store_photo(match, lambda p: telegram.download_url(item["image"], p),
+                                     item["source_name"], photo_from=len(match["items"]) - 1)
+                    match.pop("photo_failed", None)
+                    self.render_card(match)
+                    self.log(f"    added {item['source_name']} photo to {match['id']}")
+                    if self.telegram_on:
+                        self.send_draft(match)
+                        telegram.send_text(f"📷 Added a photo from {item['source_name']} (also reporting this). "
+                                           "Reply 'no photo' to remove it.", reply_to=match["msg_ids"][0])
+                    return
+                except Exception as exc:
+                    self.log(f"    outlet photo failed: {exc}")
             if match["status"] == "pending" and self.telegram_on:
                 buttons = None
                 if item.get("image"):
