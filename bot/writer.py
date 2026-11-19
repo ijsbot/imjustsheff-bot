@@ -32,7 +32,8 @@ You get one new news item plus a list of stories the page has drafted or posted 
 3. headline: the text on the image card. Max 80 characters, plain and punchy, sentence case, no emoji,
    no clickbait. Never state guilt for someone only arrested or charged.
 4. tag: the best label for the card.
-5. caption: the Instagram caption, 600-1500 characters in total. It must summarise the WHOLE story so a
+5. caption: the Instagram caption, 600-1000 characters in total (a hard limit - count the credit line and
+   hashtags too, and tighten the wording rather than drop key facts). It must summarise the WHOLE story so a
    follower understands it without clicking anywhere - never a vague teaser. Use the full article text
    when it is given (it is far more detailed than the summary).
    - Open with one short hook line with a fitting emoji.

@@ -210,10 +210,16 @@ class Bot:
         buttons = telegram.draft_buttons(story["id"], photo_options)
         path = story["card"]
         full = header + story["caption"]
+        # Telegram allows 1024 characters under a photo. Keep the card and the caption together:
+        # if the info lines don't fit too, they go in a short message just above the card.
         if len(full) <= 1024:
             msg = telegram.send_photo(path, full, buttons)
             story["msg_ids"] = [msg["message_id"]]
-        else:
+        elif len(story["caption"]) <= 1024:
+            info = telegram.send_text("ℹ️ " + header.strip())
+            msg = telegram.send_photo(path, story["caption"], buttons)
+            story["msg_ids"] = [msg["message_id"], info["message_id"]]
+        else:  # only if you write a caption longer than Telegram allows
             msg = telegram.send_photo(path, header.strip(), buttons)
             text = telegram.send_text(story["caption"], reply_to=msg["message_id"])
             story["msg_ids"] = [msg["message_id"], text["message_id"]]
