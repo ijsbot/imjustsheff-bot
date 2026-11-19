@@ -330,7 +330,7 @@ class Bot:
                 story["headline"] = text.split(":", 1)[1].strip()
                 self.render_card(story)
             else:
-                story["caption"] = text
+                story["caption"], story["caption_edited"] = text, True
             story["status"] = "pending"
             self.send_draft(story)
             return
@@ -453,30 +453,27 @@ class Bot:
             except Exception as exc:
                 self.log(f"  Failed on DM tip: {exc}")
 
+    def full_text(self, item):
+        """The whole article (feeds only carry a teaser). Not kept in the saved state - it's large."""
+        if item.get("reader") or item["source_id"] == "manual":
+            return ""
+        try:
+            return sources.fetch_article_text(item["link"])
+        except Exception as exc:
+            self.log(f"    couldn't read full article: {exc}")
+            return ""
+
     def process_item(self, item):
         self.log(f"  [{item['source_name']}] {item['title']}")
-        draft = writer.draft_for(item, self.recent_stories(), self.log)
+        text = self.full_text(item)
+        draft = writer.draft_for(dict(item, full_text=text), self.recent_stories(), self.log)
         match = self.stories.get(draft["duplicate_of"])
 
         if draft["relation"] == "same_story" and match:
             match["items"].append(item)
             self.log(f"    same story as {match['id']} ({match['status']})")
-            # A police/council draft with no photo borrows the first outlet photo that turns up.
-            if (match["status"] == "pending" and not match.get("photo") and item.get("image")
-                    and match.get("use_area_photo", True)):  # not after you said "no photo"
-                try:
-                    self.store_photo(match, lambda p: telegram.download_url(item["image"], p),
-                                     item["source_name"], photo_from=len(match["items"]) - 1)
-                    match.pop("photo_failed", None)
-                    self.render_card(match)
-                    self.log(f"    added {item['source_name']} photo to {match['id']}")
-                    if self.telegram_on:
-                        self.send_draft(match)
-                        telegram.send_text(f"📷 Added a photo from {item['source_name']} (also reporting this). "
-                                           "Reply 'no photo' to remove it.", reply_to=match["msg_ids"][0])
-                    return
-                except Exception as exc:
-                    self.log(f"    outlet photo failed: {exc}")
+            if match["status"] == "pending" and self.enrich(match, item, text):
+                return
             if match["status"] == "pending" and self.telegram_on:
                 buttons = None
                 if item.get("image"):
@@ -494,7 +491,37 @@ class Bot:
 
         update_of = match["id"] if draft["relation"] == "update" and match else None
         # Every draft uses its own article's photo (credited on the card) when the feed has one.
-        self.create_story(item, draft, update_of, photo_url=item.get("image"))
+        story = self.create_story(item, draft, update_of, photo_url=item.get("image"))
+        story["thin"] = len(text) < 400  # e.g. police feed teasers - improved when an outlet covers it
+
+    def enrich(self, story, item, text):
+        """When an outlet reports a story we only have a teaser (or no photo) for, borrow its photo and
+        rewrite the caption with its fuller detail. Returns True if the draft was updated and re-sent."""
+        notes = []
+        if not story.get("photo") and item.get("image") and story.get("use_area_photo", True):
+            try:
+                self.store_photo(story, lambda p: telegram.download_url(item["image"], p),
+                                 item["source_name"], photo_from=len(story["items"]) - 1)
+                story.pop("photo_failed", None)
+                self.render_card(story)
+                notes.append("a photo")
+            except Exception as exc:
+                self.log(f"    outlet photo failed: {exc}")
+        if story.get("thin") and len(text) >= 400 and not story.get("caption_edited"):
+            try:
+                story["caption"] = writer.rewrite_caption(story["items"][0], item["source_name"], text)
+                story["thin"] = False
+                notes.append("the full details")
+            except Exception as exc:
+                self.log(f"    detailed rewrite failed: {exc}")
+        if not notes:
+            return False
+        self.log(f"    added {' and '.join(notes)} from {item['source_name']} to {story['id']}")
+        if self.telegram_on:
+            self.send_draft(story)
+            telegram.send_text(f"✨ Updated with {' and '.join(notes)} from {item['source_name']}, which is also "
+                               "reporting this. Reply 'no photo' to drop the photo.", reply_to=story["msg_ids"][0])
+        return True
 
     # --- housekeeping --------------------------------------------------------
     def cleanup(self):

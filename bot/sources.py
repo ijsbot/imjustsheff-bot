@@ -133,3 +133,28 @@ def source_by_id(source_id):
         if s["id"] == source_id:
             return s
     return {"id": source_id, "name": source_id, "emoji": "💬" if source_id == "ig_dms" else "📝"}
+
+
+# Sites that refuse the bot - never fetched (their feed text is all we get).
+NO_FULL_TEXT = ("southyorkshire.police.uk",)
+BOILERPLATE = ("sign up", "newsletter", "cookie", "subscribe", "read more", "click here", "download the app",
+               "follow us", "share this", "advertisement", "comments", "copyright", "all rights reserved")
+
+
+def fetch_article_text(link, limit=6000):
+    """The article body as plain paragraphs, so captions can use the full story. '' if unavailable."""
+    if not link or any(d in link for d in NO_FULL_TEXT):
+        return ""
+    resp = requests.get(link, headers=HEADERS, timeout=TIMEOUT)
+    resp.raise_for_status()
+    soup = BeautifulSoup(resp.text, "html.parser")
+    for tag in soup(["script", "style", "nav", "header", "footer", "aside", "form", "figure"]):
+        tag.decompose()
+    root = soup.find("article") or soup.find("main") or soup.body or soup
+    paragraphs = []
+    for p in root.find_all("p"):
+        text = _clean(p.get_text(" "))
+        if len(text) < 40 or any(b in text.lower() for b in BOILERPLATE) or text in paragraphs:
+            continue
+        paragraphs.append(text)
+    return "\n".join(paragraphs)[:limit]
