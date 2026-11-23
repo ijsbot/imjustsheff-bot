@@ -148,23 +148,28 @@ def _tag_ribbon(img, x, y, tag, location, sensitive=False):
         d.text((x + w + 36, y + 13), location.upper(), font=loc_font, fill=loc_text)
 
 
-def _footer(img, source_name, photo_credit, sensitive=False):
+def _footer(img, source_name, photo_credit, sensitive=False, top=FOOTER_TOP, right=0, credit_word="IMAGE"):
+    """right: extra space kept free on the right (Reels put their like/comment buttons there)."""
     d = ImageDraw.Draw(img)
     accent = SOFT_GREY if sensitive else config.PINK
+    width = W - right
     # Slanted white strip with a coloured edge, like the logo's tagline banner.
-    _parallelogram(d, M - 20, FOOTER_TOP - 6, W - 2 * M + 24, FOOTER_H + 12, accent)
-    _parallelogram(d, M - 14, FOOTER_TOP, W - 2 * M + 12, FOOTER_H, WHITE)
+    _parallelogram(d, M - 20, top - 6, width - 2 * M + 24, FOOTER_H + 12, accent)
+    _parallelogram(d, M - 14, top, width - 2 * M + 12, FOOTER_H, WHITE)
     small = _font(24, b"ExtraBold Italic")
     text = f"SOURCE: {source_name.upper()}"
     if photo_credit and photo_credit.strip().lower() != source_name.strip().lower():
-        text += f"  /  IMAGE: {photo_credit.upper()}"
+        if source_name.strip().lower() == config.BRAND_NAME.lower():  # the handle already says it's us
+            text = f"{credit_word}: {photo_credit.upper()}"
+        else:
+            text += f"  /  {credit_word}: {photo_credit.upper()}"
     handle_font = _font(30)
     handle = config.BRAND_HANDLE.upper()
     handle_w = d.textlength(handle, font=handle_font)
-    while d.textlength(text, font=small) > W - 2 * M - handle_w - 70 and len(text) > 10:
+    while d.textlength(text, font=small) > width - 2 * M - handle_w - 70 and len(text) > 10:
         text = text[:-2].rstrip() + "…"
-    d.text((M + 18, FOOTER_TOP + 21), text, font=small, fill=INK)
-    d.text((W - M - handle_w - 10, FOOTER_TOP + 16), handle, font=handle_font, fill=INK if sensitive else accent)
+    d.text((M + 18, top + 21), text, font=small, fill=INK)
+    d.text((width - M - handle_w - 10, top + 16), handle, font=handle_font, fill=INK if sensitive else accent)
 
 
 # --- headline --------------------------------------------------------------------------
@@ -258,4 +263,46 @@ def render(headline, tag, source_name, location, out_path, photo_path=None, phot
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     img.convert("RGB").save(out_path, "JPEG", quality=93)
+    return out_path
+
+
+# --- video overlay ---------------------------------------------------------------------
+# Reels are 1080x1920. Instagram draws its own header at the top, the caption/username at the
+# bottom and like/comment/share buttons down the right, so everything sits inside those margins.
+VIDEO_H = 1920
+REEL_TOP, REEL_BOTTOM, REEL_RIGHT = 200, 400, 150
+
+
+def _alpha_fade(img, top, bottom, a0, a1, colour=INK):
+    alpha = Image.linear_gradient("L").resize((W, bottom - top)).point(lambda v: round(a0 + (a1 - a0) * v / 255))
+    layer = Image.new("RGBA", (W, bottom - top), colour + (255,))
+    layer.putalpha(alpha)
+    img.alpha_composite(layer, (0, top))
+
+
+def render_overlay(headline, tag, source_name, location, out_path, video_credit=None,
+                   highlight=None, sensitive=False):
+    """A transparent 1080x1920 PNG with the page's branding, laid over a video for a Reel."""
+    img = Image.new("RGBA", (W, VIDEO_H), (0, 0, 0, 0))
+    _alpha_fade(img, 0, 420, 150, 0)
+    _alpha_fade(img, 900, VIDEO_H, 0, 235)
+
+    logo = Image.open(LOGO).convert("RGBA")
+    logo_w = 380
+    logo = logo.resize((logo_w, round(logo.height * logo_w / logo.width)), Image.LANCZOS)
+    img.alpha_composite(logo, (32, REEL_TOP - 60))
+
+    footer_top = VIDEO_H - REEL_BOTTOM - FOOTER_H
+    d = ImageDraw.Draw(img)
+    words = headline.upper().split()
+    font, lines, line_h = _fit(d, words, W - 2 * M - REEL_RIGHT, 380)
+    head_top = footer_top - 74 - len(lines) * line_h
+    _tag_ribbon(img, M, head_top - 96, tag, location, sensitive)
+    pink = set() if sensitive else _highlight_positions(words, highlight, location)
+    bottom = _draw_headline(img, lines, font, line_h, head_top, pink)
+    _neon_rule(img, M, bottom + 18, 300, SOFT_GREY if sensitive else config.PINK)
+    _footer(img, source_name, video_credit, sensitive, top=footer_top, right=REEL_RIGHT, credit_word="VIDEO")
+
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    img.save(out_path, "PNG")
     return out_path

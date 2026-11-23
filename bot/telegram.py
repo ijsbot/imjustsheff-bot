@@ -8,12 +8,12 @@ from . import config
 API = "https://api.telegram.org/bot{token}/{method}"
 
 
-def _call(method, files=None, **params):
+def _call(method, files=None, _timeout=60, **params):
     url = API.format(token=config.TELEGRAM_BOT_TOKEN, method=method)
     for key, value in list(params.items()):
         if isinstance(value, (dict, list)):
             params[key] = json.dumps(value)
-    resp = requests.post(url, data=params, files=files, timeout=60)
+    resp = requests.post(url, data=params, files=files, timeout=_timeout)
     data = resp.json()
     if not data.get("ok"):
         raise RuntimeError(f"Telegram {method} failed: {data.get('description')}")
@@ -30,6 +30,42 @@ def download_photo(message, path):
     with open(path, "wb") as fh:
         fh.write(resp.content)
     return path
+
+
+# Bots can only download files up to 20 MB from Telegram.
+MAX_DOWNLOAD = 20 * 1024 * 1024
+
+
+def video_of(message):
+    """The video in a message - sent as a video, or as a file - or None.
+    Returns {"file_id", "file_size", "duration"}."""
+    if message.get("video"):
+        v = message["video"]
+    elif message.get("document", {}).get("mime_type", "").startswith("video/"):
+        v = message["document"]
+    else:
+        return None
+    return {"file_id": v["file_id"], "file_size": v.get("file_size", 0), "duration": v.get("duration", 0)}
+
+
+def download_file(file_id, path):
+    file_path = _call("getFile", file_id=file_id)["file_path"]
+    url = f"https://api.telegram.org/file/bot{config.TELEGRAM_BOT_TOKEN}/{file_path}"
+    resp = requests.get(url, timeout=180)
+    resp.raise_for_status()
+    with open(path, "wb") as fh:
+        fh.write(resp.content)
+    return path
+
+
+def send_video(path, caption, buttons=None, reply_to=None):
+    params = {"chat_id": config.TELEGRAM_CHAT_ID, "caption": caption[:1024], "supports_streaming": True}
+    if buttons:
+        params["reply_markup"] = buttons
+    if reply_to:
+        params["reply_to_message_id"] = reply_to
+    with open(path, "rb") as fh:
+        return _call("sendVideo", files={"video": fh}, _timeout=300, **params)
 
 
 def get_updates(offset):

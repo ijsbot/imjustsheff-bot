@@ -17,7 +17,7 @@ permissions:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 15    # Reels take a few minutes to edit and upload
     steps:
       - uses: actions/checkout@v4
 

@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 
-from . import card, config, instagram, instagram_dms, sources, telegram, vault, writer
+from . import card, config, instagram, instagram_dms, sources, telegram, vault, video, writer
 
 HELP = (
     "👋 imjustsheff bot\n\n"
@@ -26,7 +26,10 @@ HELP = (
     "Sensitive stories (deaths, sexual offences, children) get a muted card without pink. Reply "
     "'sensitive' or 'not sensitive' to a draft to switch it.\n\n"
     "Manual story: send a message (or a photo with a caption) with the headline on the first line, "
-    "details below, an optional link, and optionally a last line like 'Source: South Yorkshire Police'."
+    "details below, an optional link, and optionally a last line like 'Source: South Yorkshire Police'.\n\n"
+    "Videos: send a clip (up to 20 MB) the same way - headline as its caption, optional details, link and "
+    "'Source:' line. You get a branded preview back; ✅ posts it as a Reel. Reply to a draft with a "
+    "clip to turn that draft into a Reel."
 )
 
 
@@ -108,9 +111,22 @@ class Bot:
                 return st
         return None
 
+    def video_source(self, story):
+        """The original clip, fetched from Telegram (it keeps the file - nothing is stored on GitHub)."""
+        path = work_path(f"{story['id']}-source.mp4")
+        if not os.path.exists(path):
+            telegram.download_file(story["video"]["file_id"], path)
+        return path
+
     def render_card(self, story, out_path=None):
         """Draft previews go to the private work folder; only approved posts get a public card."""
         story["card_version"] = story.get("card_version", 0) + 1
+        if story.get("video"):  # a small branded preview clip for Telegram
+            out_path = work_path(f"{story['id']}-{story['card_version']}.mp4")
+            video.render(story, self.video_source(story), out_path, work_path(f"{story['id']}-overlay.png"),
+                         preview=True)
+            story["card"] = out_path
+            return out_path
         out_path = out_path or work_path(f"{story['id']}-{story['card_version']}.jpg")
         # A photo you sent for this story wins; otherwise one of your own area photos.
         photo, credit = None, None
@@ -131,7 +147,7 @@ class Bot:
         story.update(photo=vault.store_photo(plain, story["id"]), photo_credit=credit, photo_from=photo_from)
 
     # --- drafts ------------------------------------------------------------
-    def create_story(self, item, draft, update_of=None, photo_msg=None, photo_url=None):
+    def create_story(self, item, draft, update_of=None, photo_msg=None, photo_url=None, clip=None):
         sid = hashlib.sha1((item["uid"] + now().isoformat()).encode()).hexdigest()[:8]
         story = {
             "id": sid,
@@ -150,7 +166,10 @@ class Bot:
             "update_of": update_of,
             "msg_ids": [],
         }
-        if photo_msg:
+        if clip:
+            story.update(video=clip, video_credit=item["source_name"])
+            self.render_card(story)
+        elif photo_msg:
             self.attach_photo(story, photo_msg, credit=item["source_name"])  # also renders the card
         elif photo_url:
             try:
@@ -170,6 +189,8 @@ class Bot:
     def send_draft(self, story):
         src = sources.source_by_id(story["source_id"])
         lines = [f"{src.get('emoji', '📝')} {story['source_name']}"]
+        if story.get("video"):
+            lines.append("🎬 Reel - ✅ posts this video to Instagram (preview is lower quality)")
         if story.get("sensitive"):
             lines.append("🕊️ Sensitive style (no pink) - reply 'not sensitive' to switch")
         if story["media"]:
@@ -206,21 +227,22 @@ class Bot:
         for mid in story.get("msg_ids", [])[:1]:
             telegram.clear_buttons(mid)
         photo_options = [(i, it["source_name"]) for i, it in enumerate(story["items"])
-                         if it.get("image") and story.get("photo_from") != i]
+                         if it.get("image") and story.get("photo_from") != i and not story.get("video")]
         buttons = telegram.draft_buttons(story["id"], photo_options)
         path = story["card"]
+        send_media = telegram.send_video if story.get("video") else telegram.send_photo
         full = header + story["caption"]
         # Telegram allows 1024 characters under a photo. Keep the card and the caption together:
         # if the info lines don't fit too, they go in a short message just above the card.
         if len(full) <= 1024:
-            msg = telegram.send_photo(path, full, buttons)
+            msg = send_media(path, full, buttons)
             story["msg_ids"] = [msg["message_id"]]
         elif len(story["caption"]) <= 1024:
             info = telegram.send_text("ℹ️ " + header.strip())
-            msg = telegram.send_photo(path, story["caption"], buttons)
+            msg = send_media(path, story["caption"], buttons)
             story["msg_ids"] = [msg["message_id"], info["message_id"]]
         else:  # only if you write a caption longer than Telegram allows
-            msg = telegram.send_photo(path, header.strip(), buttons)
+            msg = send_media(path, header.strip(), buttons)
             text = telegram.send_text(story["caption"], reply_to=msg["message_id"])
             story["msg_ids"] = [msg["message_id"], text["message_id"]]
 
@@ -301,6 +323,11 @@ class Bot:
             story = self.stories.get(self.s["awaiting_edit"])
         self.s["awaiting_edit"] = None
 
+        clip = telegram.video_of(msg)
+        if clip:
+            self.on_video(msg, clip, story, text, reply)
+            return
+
         if msg.get("photo"):
             if story and story["status"] in ("pending", "failed"):
                 self.attach_photo(story, msg, credit=text or story["source_name"])
@@ -343,11 +370,33 @@ class Bot:
 
         self.manual_story(text)
 
+    def on_video(self, msg, clip, story, text, reply):
+        if clip["file_size"] > telegram.MAX_DOWNLOAD:
+            mb = clip["file_size"] / 1024 / 1024
+            telegram.send_text(f"⚠️ That video is {mb:.0f} MB - Telegram only lets bots download up to 20 MB. "
+                               "Trim it or send it at a lower quality (e.g. 720p) and try again.",
+                               reply_to=msg["message_id"])
+            return
+        if story and story["status"] in ("pending", "failed"):
+            story.update(video=clip, video_credit=text or story["source_name"], status="pending")
+            story.pop("reel_container", None)
+            self.render_card(story)
+            self.send_draft(story)
+        elif reply:
+            telegram.send_text("⚠️ I couldn't match that video to a draft (it may have been posted, skipped "
+                               "or expired). Send it on its own with the headline as its caption.")
+        elif text:
+            telegram.send_text("🎬 Got it - editing your video now (about a minute)…", reply_to=msg["message_id"])
+            self.manual_story(text, clip=clip)
+        else:
+            telegram.send_text("🎬 Send the video again with the headline as its caption (details, a link and "
+                               "a 'Source:' line can go underneath).", reply_to=msg["message_id"])
+
     def attach_photo(self, story, msg, credit):
         self.store_photo(story, lambda p: telegram.download_photo(msg, p), credit)
         self.render_card(story)
 
-    def manual_story(self, text, photo_msg=None):
+    def manual_story(self, text, photo_msg=None, clip=None):
         lines = [l.strip() for l in text.splitlines() if l.strip()]
         source_name = "imjustsheff"
         if len(lines) > 1 and lines[-1].lower().startswith("source:"):
@@ -362,28 +411,67 @@ class Bot:
             "link": link, "published": None, "official": True, "media": False,
         }
         draft = writer.draft_for(item, self.recent_stories(), self.log)
-        self.create_story(item, draft, photo_msg=photo_msg)
+        self.create_story(item, draft, photo_msg=photo_msg, clip=clip)
 
     # --- publishing ----------------------------------------------------------
+    def publish_reel(self, story):
+        """Edit the full-quality Reel and upload it. Returns the link, or None if Instagram is still
+        processing (the story stays approved and is finished on the next run)."""
+        container = story.get("reel_container")
+        path = None
+        if not container:
+            path = work_path(f"{story['id']}-reel.mp4")
+            video.render(story, self.video_source(story), path, work_path(f"{story['id']}-overlay.png"))
+        try:
+            return instagram.publish_reel(path, story["caption"], container=container)
+        except instagram.StillProcessing as waiting:
+            first_time = not story.get("reel_container")
+            story["reel_container"] = waiting.container
+            story["reel_waits"] = story.get("reel_waits", 0) + 1
+            if story["reel_waits"] > 6:
+                story.pop("reel_container", None)
+                story.pop("reel_waits", None)
+                raise RuntimeError("Instagram has been processing this video for too long")
+            if not self.dry_run:
+                vault.save_state(self.s)
+            if first_time:
+                telegram.send_text("⏳ Uploaded - Instagram is still processing the video. It'll be posted on "
+                                   "the next run.", reply_to=story["msg_ids"][0])
+            return None
+        except Exception:
+            story.pop("reel_container", None)  # start again with a fresh upload on Try again
+            story.pop("reel_waits", None)
+            raise
+
     def publish_approved(self):
         posted = 0
+        reels_this_run = 0
         for story in self.stories.values():
             if story["status"] != "approved":
                 continue
             if posted >= config.MAX_POSTS_PER_RUN:
                 break  # keeps each run well inside GitHub's time limit; the rest go next run
-            if not (config.IG_USER_ID and config.IG_ACCESS_TOKEN and config.IMAGE_BASE_URL):
+            if not (config.IG_USER_ID and config.IG_ACCESS_TOKEN and (config.IMAGE_BASE_URL or story.get("video"))):
                 story["status"] = "failed"
                 telegram.send_text("⚠️ Instagram isn't set up yet (IG_USER_ID / IG_ACCESS_TOKEN missing).",
                                    reply_to=story["msg_ids"][0])
                 continue
+            if story.get("video"):
+                if reels_this_run >= 1:
+                    continue  # editing and uploading a video takes a few minutes - one per run
+                reels_this_run += 1
             try:
-                # Only now does the card go online - Instagram downloads it from the public repo.
-                public = self.render_card(story, os.path.join(config.CARDS_DIR, f"{story['id']}.jpg"))
-                make_public(public)
-                image_url = f"{config.IMAGE_BASE_URL}/cards/{story['id']}.jpg"
-                wait_until_online(image_url)
-                link = instagram.publish(image_url, story["caption"])
+                if story.get("video"):
+                    link = self.publish_reel(story)
+                    if not link:
+                        continue  # Instagram still processing - finishes on the next run
+                else:
+                    # Only now does the card go online - Instagram downloads it from the public repo.
+                    public = self.render_card(story, os.path.join(config.CARDS_DIR, f"{story['id']}.jpg"))
+                    make_public(public)
+                    image_url = f"{config.IMAGE_BASE_URL}/cards/{story['id']}.jpg"
+                    wait_until_online(image_url)
+                    link = instagram.publish(image_url, story["caption"])
                 story.update(status="posted", posted=now().isoformat(), permalink=link)
                 posted += 1
                 # Remember it straight away, so a run cut short can never post this one twice.
